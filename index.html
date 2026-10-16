@@ -243,6 +243,7 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
 .m .who { font-size: 12px; color: var(--muted); }
 .m b { color: var(--gold); font-family: var(--f-display); font-size: 15px; }
 .m .apply { color: var(--indigo); }
+.exportbox { width: 100%; min-height: 70px; font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); padding: 8px; word-break: break-all; }
 .modeline { font-size: 12px; color: var(--muted); text-align: center; }
 
 /* Bottom nav */
@@ -464,6 +465,8 @@ async function init() {
   if (!db) {
     S.mode = 'local'; S.loaded = true;
     if (!c || !c.tasks || (!c.tasks.length && c.mode !== 'local')) sampleTasks().forEach(t => S.tasks.set(t.id, t));
+    S.importData = readImport();
+    window.addEventListener('hashchange', () => { S.importData = readImport(); render(); });
     saveCache(); render(); return;
   }
   S.db = db; S.mode = 'cloud';
@@ -685,6 +688,9 @@ function renderSettings() {
     <label class="field">締め切り（日付をまたいでもOK）<input type="time" id="s-dayEnd" value="${esc(st.dayEnd)}"></label>
     <label class="field">やることの間の余白（分）<input type="number" id="s-buffer" min="0" max="60" step="5" value="${esc(st.buffer)}"></label>
   </div></section>`;
+  if (S.mode === 'local') h += `<section class="panel"><h3>別の端末に移す</h3><p class="lead">スマホとパソコンは、それぞれのブラウザに別々に保存されます。下のリンクを別の端末で開くと、今の中身（朝の固定タスク・設定・やること）をそのまま移せます。</p>
+    <div><button class="btn small gold" data-act="exportLink">引っ越し用リンクをコピー</button></div>
+    <textarea id="exportBox" class="exportbox" readonly hidden aria-label="引っ越し用リンク"></textarea></section>`;
   h += `<details class="fold"><summary>参考にした経営者のやり方</summary><div class="inner mlist">${METHODS.map(m => `<div class="m"><span class="who">${esc(m.who)}</span><b>${esc(m.t)}</b><span class="apply">${esc(m.a)}</span></div>`).join('')}<div class="m"><span class="who">画面づくりの参考</span><span>${REFS}</span></div></div></details>`;
   h += modeLine();
   return h;
@@ -692,7 +698,7 @@ function renderSettings() {
 function render() {
   const main = $('#main'), a = document.activeElement;
   if (S.dragging || (a && main.contains(a) && a.matches('input, select, textarea'))) { S.pendingRender = true; return; }
-  main.innerHTML = S.view === 'settings' ? renderSettings() : renderToday();
+  main.innerHTML = importNotice() + (S.view === 'settings' ? renderSettings() : renderToday());
   wireDrag();
   S.fresh = null;
   document.querySelectorAll('.nav [data-view]').forEach(b => b.setAttribute('aria-current', b.dataset.view === S.view ? 'page' : 'false'));
@@ -705,6 +711,20 @@ $('#main').addEventListener('focusout', () => {
     if (S.pendingRender) { S.pendingRender = false; render(); }
   }, 400);
 });
+
+// ---------- moving data between devices (web version) ----------
+// Everything is packed into the link's #setup= part, so nothing is sent to any server.
+const b64e = str => { let bin = ''; new TextEncoder().encode(str).forEach(b => { bin += String.fromCharCode(b); }); return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const b64d = str => new TextDecoder().decode(Uint8Array.from(atob(str.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)));
+function readImport() {
+  const m = location.hash.match(/^#setup=([A-Za-z0-9_-]+)$/); if (!m) return null;
+  try { const o = JSON.parse(b64d(m[1])); return o && typeof o === 'object' && Array.isArray(o.tasks) ? o : null; } catch (e) { return null; }
+}
+function importNotice() {
+  const o = S.importData; if (!o) return '';
+  const n = o.tasks.filter(t => !t.done).length, r = ((o.settings || {}).routines || []).length;
+  return `<div class="notice gold"><div><b>引っ越しデータがあります</b>（やること${n}件・朝の固定タスク${r}つ）。この端末の中身を、これに置き換えますか？</div><div class="acts"><button class="btn small gold" data-act="importYes">置き換える</button><button class="btn small soft" data-act="importNo">やめる</button></div></div>`;
+}
 
 // ---------- drag to reorder ----------
 // Save the new order of untimed tasks from the order of rows on screen; timed appointments keep their times.
@@ -823,6 +843,24 @@ $('#main').addEventListener('click', e => {
     const P = planDay(S.viewDate), nd = addDays(S.viewDate, 1); let k = nextOrder(nd);
     P.overflow.forEach(t => putTask({ ...t, date: nd, order: k++ }, true));
     render(); toast(`${P.overflow.length}件を明日へ回しました`);
+  }
+  else if (act === 'importYes') {
+    const o = S.importData; if (!o) return;
+    S.tasks = new Map((o.tasks || []).filter(t => t && t.id).map(t => [t.id, t]));
+    S.days = new Map((o.days || []).filter(x => x && x.date).map(x => [x.date, x]));
+    S.settings = { ...DEF, ...(o.settings || {}) };
+    S.importData = null; history.replaceState(null, '', location.pathname); saveCache(); render();
+    toast('読み込みました。この端末でも同じ中身で使えます');
+  }
+  else if (act === 'importNo') { S.importData = null; history.replaceState(null, '', location.pathname); render(); }
+  else if (act === 'exportLink') {
+    const cutoff = addDays(todayStr(), -14);
+    const data = { v: 1, settings: S.settings, tasks: [...S.tasks.values()].filter(t => !t.done || (t.date && t.date >= cutoff)), days: [...S.days.values()].filter(x => x.date >= cutoff) };
+    const url = location.origin + location.pathname + '#setup=' + b64e(JSON.stringify(data));
+    const box = $('#exportBox'); box.value = url; box.hidden = false;
+    const done = () => toast('コピーしました。LINEなどで自分に送って、別の端末で開いてください');
+    try { navigator.clipboard.writeText(url).then(done, () => { box.select(); toast('リンクを長押ししてコピーしてください'); }); }
+    catch (e) { box.select(); toast('リンクを長押ししてコピーしてください'); }
   }
   else if (act === 'clearEx') {
     [...S.tasks.values()].filter(t => t.example).forEach(t => { S.tasks.delete(t.id); write('tasks/' + t.id, r => r.delete()); });

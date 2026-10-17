@@ -246,6 +246,11 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
 .exportbox { width: 100%; min-height: 70px; font-family: var(--f-mono); font-size: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); padding: 8px; word-break: break-all; }
 .item.cal { background: var(--indigo-soft); }
 .item.cal .time { color: var(--indigo); }
+.item.cal .body { cursor: default; }
+.meet { display: inline-flex; align-items: center; gap: 4px; background: var(--indigo); color: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; justify-self: start; }
+.meet::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .8; }
+.meet:hover { filter: brightness(1.1); }
+.calrow .meet { grid-column: 2; }
 .cal-ico { width: 24px; height: 24px; display: grid; place-items: center; color: var(--indigo); }
 .cal-ico svg { width: 19px; height: 19px; }
 .chip.gcal { background: transparent; box-shadow: inset 0 0 0 1px var(--indigo); color: var(--indigo); }
@@ -455,6 +460,13 @@ function setDay(d, patch, quiet) {
   write('days/' + d, r => r.set(JSON.parse(JSON.stringify(doc))));
 }
 const routineDoneOn = d => dayDoc(d).routine || {};
+const calDoneOn = d => dayDoc(d).calDone || {};
+function toggleCal(d, cid) {
+  const cur = { ...calDoneOn(d) };
+  if (cur[cid]) delete cur[cid]; else cur[cid] = Date.now();
+  setDay(d, { calDone: cur });
+  if (cur[cid]) toast('終わりました');
+}
 function toggleRoutine(d, rid) {
   const cur = { ...routineDoneOn(d) };
   if (cur[rid]) delete cur[rid]; else cur[rid] = Date.now();
@@ -523,7 +535,9 @@ function planDay(d) {
   if (isToday) start = Math.max(start, Math.ceil(nowMin() / 5) * 5);
   const busy = fixedList(d).map(t => ({ t, start: timeMin(t.time), end: timeMin(t.time) + (t.dur || 30), fixed: true }));
   const cal = calEvents(d);
-  cal.timed.forEach(ev => busy.push({ cal: true, fixed: true, t: { id: 'cal_' + ev.id, title: ev.title }, start: ev.s, end: ev.e }));
+  const cDone = calDoneOn(d);
+  cal.timed.filter(ev => !cDone[ev.id]).forEach(ev => busy.push({ cal: true, fixed: true, ev, t: { id: 'cal_' + ev.id, title: ev.title }, start: ev.s, end: ev.e }));
+  const calDone = cal.timed.filter(ev => cDone[ev.id]).map(ev => ({ ev, doneAt: cDone[ev.id] }));
   // Earliest slot at or after `from` that clears every fixed block. Tasks are placed strictly in
   // priority order (each starts after the previous one), so a short task never jumps ahead.
   const fit = (dur, from) => [from, ...busy.map(b => b.end + buf)].filter(c => c >= from).sort((a, b) => a - b)
@@ -541,7 +555,7 @@ function planDay(d) {
     busy.push({ t, start: at, end: at + dur }); cursor = at + dur + buf;
   }
   const done = [...S.tasks.values()].filter(t => t.done && t.date === d).sort((a, b) => (a.doneAt || 0) - (b.doneAt || 0));
-  return { items: busy.sort((a, b) => a.start - b.start), overflow, done, isToday, routines, rDone, rOpen, allDay: cal.allDay };
+  return { items: busy.sort((a, b) => a.start - b.start), overflow, done, isToday, routines, rDone, rOpen, allDay: cal.allDay, calDone };
 }
 
 // ---------- moon ----------
@@ -683,9 +697,12 @@ function renderFlow(d) {
     h += `<div class="notice"><div><b>締め切り（${esc(S.settings.dayEnd)}）までに入りきらないことがあります。</b></div><ul>${P.overflow.map(t => `<li>${esc(t.title)}（${durTxt(t.dur || 30)}）</li>`).join('')}</ul><div class="acts"><button class="btn small gold" data-act="overflowTmr">まとめて明日へ</button></div></div>`;
   }
   const rAll = P.routines.length && !P.rOpen.length;
-  if (P.done.length || rAll) {
+  if (P.done.length || rAll || P.calDone.length) {
     const rLog = rAll ? `<li><span class="mono muted">${hm(Math.max(...P.routines.map(r => P.rDone[r.id] || 0)))}</span><span class="rt-ico" aria-hidden="true">${LOOP_SVG}</span><span>朝の固定タスク（${P.routines.length}つ）</span></li>` : '';
-    h += `<details class="fold"${P.isToday ? '' : ' open'}><summary>終わったこと（${P.done.length + (rAll ? 1 : 0)}）</summary><div class="inner"><ul class="donelog">${rLog}${P.done.map(t => `<li><span class="mono muted">${hm(t.doneAt)}</span><button class="check on" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を未完了に戻す"></button><span>${esc(t.title)}</span></li>`).join('')}</ul></div></details>`;
+    h += `<details class="fold"${P.isToday ? '' : ' open'}><summary>終わったこと（${P.done.length + P.calDone.length + (rAll ? 1 : 0)}）</summary><div class="inner"><ul class="donelog">${rLog}${[
+      ...P.done.map(t => ({ at: t.doneAt || 0, html: `<li><span class="mono muted">${hm(t.doneAt)}</span><button class="check on" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を未完了に戻す"></button><span>${esc(t.title)}</span></li>` })),
+      ...P.calDone.map(c => ({ at: c.doneAt, html: `<li><span class="mono muted">${hm(c.doneAt)}</span><button class="check on" data-act="calToggle" data-cid="${esc(c.ev.id)}" aria-label="「${esc(c.ev.title)}」を未完了に戻す"></button><span>${esc(c.ev.title)}</span></li>` })),
+    ].sort((a, b) => a.at - b.at).map(x => x.html).join('')}</ul></div></details>`;
   }
   if (P.isToday) h += `<div class="btnrow"><button class="btn soft" data-act="replan">順番を変える</button><button class="btn soft" data-act="next">明日の準備をする →</button></div>`;
   h += modeLine();
@@ -720,15 +737,17 @@ function renderSettings() {
     const on = !!st.gcalUrl, t0 = todayStr(), c = S.cal[t0];
     h += `<section class="panel" id="gcal-panel"><h3>Googleカレンダー連携</h3>
       <p class="lead">Googleカレンダーの予定を読み込んで、その時間を避けてやることを並べます。読み取るだけで、カレンダーを書き換えることはありません。</p>
-      <div class="gstate ${on ? (S.calError ? 'ng' : 'ok') : ''}">${on ? (S.calError ? (S.calError === 'token' ? 'つながっていません：合言葉が合いません（手順1〜3をやり直してください）' : 'つながっていません：URLか通信を確認してください') : `つながっています${c && c.at ? `（${hm(c.at)}に読み込み・今日の予定 ${c.events.filter(e => !e.allDay).length}件）` : ''}`) : 'まだつながっていません'}</div>
+      <div class="gstate ${on ? (S.calError ? 'ng' : 'ok') : ''}">${on ? (S.calError ? (S.calError === 'token' ? 'つながっていません：合言葉が合いません（手順1〜3をやり直してください）' : 'つながっていません：URLか通信を確認してください') : `つながっています${c && c.at ? `（${hm(c.at)}に読み込み・今日の予定 ${c.events.filter(e => !e.allDay).length}件）` : ''}${c && c.at && !c.failed && (c.v || 1) < 2 ? '<br><span class="carry">コードが古いため、Meetのリンクが出ません。下の「コードを新しくするとき」の手順で更新してください。</span>' : c && c.v >= 2 && !c.meet ? '<br><span class="carry">Meetのリンクを出すには、Apps Script の「サービス」に Google Calendar API を追加して、新バージョンでデプロイしてください。</span>' : ''}`) : 'まだつながっていません'}</div>
       <details class="fold"${on ? '' : ' open'}><summary>つなぎ方（最初の1回だけ・3分ほど）</summary><div class="inner">
         <ol class="gsteps">
           <li>下の「コードをコピー」を押します。<div style="margin-top:6px"><button class="btn small gold" data-act="gcalCopy">コードをコピー</button></div></li>
           <li><a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">Google Apps Script の新しいプロジェクト</a>を開き（予定が入っているGoogleアカウントで）、最初から書いてある文字を全部消して、コピーしたコードを貼り付けて保存します。</li>
+          <li>左の「サービス」の「＋」→「Google Calendar API」を選んで「追加」します（Meetのリンクを出すのに使います）。</li>
           <li>右上の「デプロイ」→「新しいデプロイ」→ 歯車から「ウェブアプリ」を選び、「次のユーザーとして実行：自分」「アクセスできるユーザー：全員」にして「デプロイ」を押します。</li>
           <li>許可を求められたら自分のアカウントを選んで許可します。「このアプリは Google で確認されていません」と出たら、「詳細」→「（プロジェクト名）に移動」で進めます。自分で作ったものなので大丈夫です。</li>
           <li>最後に出る「ウェブアプリのURL」（https://script.google.com/macros/s/…/exec）をコピーして、下に貼り付けて「つなぐ」を押します。</li>
         </ol>
+        <p class="lead"><b>すでにつないでいて、コードを新しくするとき</b>：Apps Script を開いてコードを全部貼り替えて保存 →（まだなら「サービス」に Google Calendar API を追加）→「デプロイ」→「デプロイを管理」→ 鉛筆マーク →「バージョン：新バージョン」→「デプロイ」。URLは変わらないので、貼り直しは要りません。</p>
         <textarea class="gcode" id="gcalCode" readonly aria-label="Apps Script のコード">${esc(gasCode(st.gcalToken || ''))}</textarea>
       </div></details>
       <div class="addline"><input id="gcal-url" value="${esc(st.gcalUrl || '')}" placeholder="https://script.google.com/macros/s/…/exec" aria-label="ウェブアプリのURL"><button class="btn small gold" data-act="gcalConnect">${on ? '更新' : 'つなぐ'}</button></div>
@@ -777,24 +796,51 @@ function importNotice() {
 // ---------- Google Calendar ----------
 // A small Apps Script in the user's own Google account returns their events as JSON.
 const calOn = () => S.mode === 'local' && !!S.settings.gcalUrl;
+const meetBtn = link => link && /^https:\/\//.test(link) ? `<a class="meet" href="${esc(link)}" target="_blank" rel="noopener">${/meet\.google\.com/.test(link) ? 'Meetに参加' : /zoom\.us/.test(link) ? 'Zoomに参加' : '会議に参加'}</a>` : '';
 const CAL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>';
 function gasCode(token) {
-  return `// 朝の段取り帳 ⇄ Googleカレンダー（読み取り専用）
+  return `// 朝の段取り帳 ⇄ Googleカレンダー（読み取り専用） v2
 const TOKEN = '${token}';
 function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.token !== TOKEN) return out({ error: 'token' });
   const from = new Date(Number(p.from)), to = new Date(Number(p.to));
+  const api = typeof Calendar !== 'undefined';
   const events = [];
   CalendarApp.getAllCalendars().forEach(cal => {
     if (cal.isHidden()) return;
+    try { if (api) return listByApi(cal, from, to, events); } catch (err) {}
     cal.getEvents(from, to).forEach(ev => {
       try { if (ev.getMyStatus() === CalendarApp.GuestStatus.NO) return; } catch (err) {}
       events.push({ id: ev.getId() + '@' + ev.getStartTime().getTime(), title: ev.getTitle() || '(タイトルなし)',
-        start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime(), allDay: ev.isAllDayEvent(), cal: cal.getName() });
+        start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime(), allDay: ev.isAllDayEvent(), cal: cal.getName(),
+        link: linkIn(ev.getLocation()) || linkIn(ev.getDescription()) });
     });
   });
-  return out({ events });
+  return out({ v: 2, meet: api, events });
+}
+// With the "Google Calendar API" service added, Meet links come from the event itself.
+function listByApi(cal, from, to, events) {
+  let pageToken;
+  do {
+    const r = Calendar.Events.list(cal.getId(), { timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: true, maxResults: 250, pageToken: pageToken });
+    (r.items || []).forEach(it => {
+      if (it.status === 'cancelled') return;
+      const me = (it.attendees || []).filter(a => a.self)[0];
+      if (me && me.responseStatus === 'declined') return;
+      const allDay = !it.start.dateTime, tz = cal.getTimeZone();
+      const s = allDay ? Utilities.parseDate(it.start.date, tz, 'yyyy-MM-dd') : new Date(it.start.dateTime);
+      const en = allDay ? Utilities.parseDate(it.end.date, tz, 'yyyy-MM-dd') : new Date(it.end.dateTime);
+      const video = ((it.conferenceData && it.conferenceData.entryPoints) || []).filter(x => x.entryPointType === 'video').map(x => x.uri)[0];
+      events.push({ id: it.id, title: it.summary || '(タイトルなし)', start: s.getTime(), end: en.getTime(), allDay: allDay, cal: cal.getName(),
+        link: it.hangoutLink || video || linkIn(it.location) || linkIn(it.description) });
+    });
+    pageToken = r.nextPageToken;
+  } while (pageToken);
+}
+function linkIn(text) {
+  const m = String(text || '').match(/https:\\/\\/(meet\\.google\\.com\\/[a-z0-9-]+|[\\w.-]*zoom\\.us\\/[^\\s"<>]+|teams\\.microsoft\\.com\\/[^\\s"<>]+)/i);
+  return m ? m[0] : '';
 }
 function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 `;
@@ -821,7 +867,7 @@ async function ensureCal(d, force) {
     const res = await fetch(url);
     const j = await res.json();
     if (!j || j.error || !Array.isArray(j.events)) throw new Error(j && j.error === 'token' ? 'token' : 'format');
-    S.cal[d] = { at: Date.now(), events: j.events };
+    S.cal[d] = { at: Date.now(), events: j.events, v: j.v || 1, meet: !!j.meet };
     S.calError = '';
     if (force) toast(`Googleカレンダーから${j.events.length}件の予定を読み込みました`);
   } catch (e) {
@@ -851,14 +897,14 @@ function calPlanHTML(d) {
   const { timed, allDay } = calEvents(d);
   if (!timed.length && !allDay.length) return `<div class="subhead">Googleカレンダーの予定：この日はありません</div>`;
   return `<div class="subhead">Googleカレンダーの予定（この時間を避けて組みます）</div>${allDayHTML(allDay)}` +
-    timed.map(ev => `<div class="calrow"><span class="mono">${fmt(ev.s)}–${fmt(ev.e)}</span><span>${esc(ev.title)}</span></div>`).join('');
+    timed.map(ev => `<div class="calrow"><span class="mono">${fmt(ev.s)}–${fmt(ev.e)}</span><span>${esc(ev.title)}</span>${meetBtn(ev.link)}</div>`).join('');
 }
 function calRowHTML(it, now, cur) {
   const past = now != null && it.end <= now;
   return `<li class="item cal${past ? ' past' : ''}${cur ? ' cur' : ''}">
     <div class="time mono">${fmt(it.start)}<small>${fmt(it.end)}</small></div>
-    <span class="cal-ico" aria-hidden="true">${CAL_SVG}</span>
-    <button class="body" data-act="calInfo"><span class="title">${esc(it.t.title)}</span><span class="meta">${cur ? `<span class="chip cur">${cur}</span>` : ''}<span class="chip gcal">Googleカレンダー</span><span class="chip">${durTxt(Math.round(it.end - it.start))}</span></span></button>
+    <button class="check" data-act="calToggle" data-cid="${esc(it.ev.id)}" aria-label="「${esc(it.t.title)}」を終わったことにする"></button>
+    <div class="body"><span class="title">${esc(it.t.title)}</span><span class="meta">${cur ? `<span class="chip cur">${cur}</span>` : ''}${past ? '<span class="chip late">終わったらチェック</span>' : ''}<span class="chip gcal">Googleカレンダー</span><span class="chip">${durTxt(Math.round(it.end - it.start))}</span></span>${meetBtn(it.ev.link)}</div>
   </li>`;
 }
 
@@ -981,7 +1027,7 @@ $('#main').addEventListener('click', e => {
     render(); toast(`${P.overflow.length}件を明日へ回しました`);
   }
   else if (act === 'calRefresh') ensureCal(S.viewDate, true);
-  else if (act === 'calInfo') toast('Googleカレンダーの予定です。変えるときはカレンダーの方で変更してください');
+  else if (act === 'calToggle') toggleCal(S.viewDate, b.dataset.cid);
   else if (act === 'gcalCopy') {
     const box = $('#gcalCode'), code = gasCode(S.settings.gcalToken);
     try { navigator.clipboard.writeText(code).then(() => toast('コードをコピーしました'), () => { box.focus(); box.select(); toast('コードを長押し（右クリック）してコピーしてください'); }); }

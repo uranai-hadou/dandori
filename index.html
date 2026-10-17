@@ -380,6 +380,7 @@ const RT_DURS = [5, 10, 15, 20, 30, 45, 60];
 const WD = '日月火水木金土';
 const DEF = {
   dayStart: '07:00', dayEnd: '01:00', buffer: 10,
+  nightStart: '22:00', nightRoutines: [],
   routines: [
     { id: 'rex1', title: '（例）今日のカードを1枚引く', dur: 5 },
     { id: 'rex2', title: '（例）予約と入金の確認', dur: 10 },
@@ -459,7 +460,13 @@ function setDay(d, patch, quiet) {
   S.days.set(d, doc); if (!quiet) render();
   write('days/' + d, r => r.set(JSON.parse(JSON.stringify(doc))));
 }
-const routineDoneOn = d => dayDoc(d).routine || {};
+// Two kinds of daily fixed tasks: morning (first thing) and night (from a set time).
+const RK = {
+  am: { key: 'routines', done: 'routine', label: '朝の固定タスク', box: 'routine', panel: 'routines-panel', pre: 'rt' },
+  pm: { key: 'nightRoutines', done: 'night', label: '夜の固定タスク', box: 'nightroutine', panel: 'night-panel', pre: 'rn' },
+};
+const routinesOf = k => S.settings[RK[k].key] || [];
+const routineDoneOn = (d, k = 'am') => dayDoc(d)[RK[k].done] || {};
 const calDoneOn = d => dayDoc(d).calDone || {};
 function toggleCal(d, cid) {
   const cur = { ...calDoneOn(d) };
@@ -467,12 +474,12 @@ function toggleCal(d, cid) {
   setDay(d, { calDone: cur });
   if (cur[cid]) toast('終わりました');
 }
-function toggleRoutine(d, rid) {
-  const cur = { ...routineDoneOn(d) };
+function toggleRoutine(d, rid, k = 'am') {
+  const cur = { ...routineDoneOn(d, k) };
   if (cur[rid]) delete cur[rid]; else cur[rid] = Date.now();
-  setDay(d, { routine: cur });
-  const R = S.settings.routines || [];
-  if (cur[rid] && R.length && R.every(r => cur[r.id])) toast('朝の固定タスク完了。ここから本番です');
+  setDay(d, { [RK[k].done]: cur });
+  const R = routinesOf(k);
+  if (cur[rid] && R.length && R.every(r => cur[r.id])) toast(k === 'pm' ? '夜の固定タスク完了。今日もおつかれさまでした' : '朝の固定タスク完了。ここから本番です');
 }
 
 function sampleTasks() {
@@ -543,6 +550,8 @@ function planDay(d) {
   const fit = (dur, from) => [from, ...busy.map(b => b.end + buf)].filter(c => c >= from).sort((a, b) => a - b)
     .find(c => c + dur <= dayEnd && busy.every(b => c >= b.end + buf || c + dur + buf <= b.start));
   let cursor = start;
+  const nights = st.nightRoutines || [], nDone = routineDoneOn(d, 'pm'), nOpen = nights.filter(r => !nDone[r.id]);
+  if (nOpen.length) { const ns = timeMin(st.nightStart || '22:00'); busy.push({ routine: true, kind: 'pm', fixed: true, t: { id: '__night' }, start: ns, end: ns + sum(nOpen, r => r.dur || 10) }); }
   const routines = st.routines || [], rDone = routineDoneOn(d), rOpen = routines.filter(r => !rDone[r.id]);
   if (rOpen.length) {
     const dur = sum(rOpen, r => r.dur || 10), at = fit(dur, cursor);
@@ -555,7 +564,7 @@ function planDay(d) {
     busy.push({ t, start: at, end: at + dur }); cursor = at + dur + buf;
   }
   const done = [...S.tasks.values()].filter(t => t.done && t.date === d).sort((a, b) => (a.doneAt || 0) - (b.doneAt || 0));
-  return { items: busy.sort((a, b) => a.start - b.start), overflow, done, isToday, routines, rDone, rOpen, allDay: cal.allDay, calDone };
+  return { items: busy.sort((a, b) => a.start - b.start), overflow, done, isToday, routines, rDone, rOpen, nights, nDone, nOpen, allDay: cal.allDay, calDone };
 }
 
 // ---------- moon ----------
@@ -612,11 +621,15 @@ function renderPlan(d) {
   h += R.length
     ? `<details class="fold"><summary>中身を見る</summary><div class="inner"><ul class="mini">${R.map(r => `<li><span>${esc(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`).join('')}</ul><div class="foot"><button class="textbtn" data-act="rtEdit">編集する</button></div></div></details>`
     : `<div class="card"><button class="btn soft small" data-act="rtEdit">朝の固定タスクを登録する</button></div>`;
+  const NR = S.settings.nightRoutines || [];
+  h += NR.length
+    ? `<details class="fold"><summary>夜の固定タスク（${esc(S.settings.nightStart || '22:00')}から ${NR.length}つ・約${durTxt(sum(NR, r => r.dur || 10))}）</summary><div class="inner"><ul class="mini">${NR.map(r => `<li><span>${esc(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`).join('')}</ul><div class="foot"><button class="textbtn" data-act="rtEdit" data-k="pm">編集する</button></div></div></details>`
+    : `<div class="linkrow"><span>夜に毎日やることも登録できます</span><button class="textbtn" data-act="rtEdit" data-k="pm">夜の固定タスクを登録する</button></div>`;
 
   if (phase === 'dump') {
     // 2. brain dump: write everything first, no ordering yet
     h += `<div class="step"><span class="n">2</span><div><h2>${isT ? 'やること・やりたいことを全部書き出す' : `${relLabel(d) || 'この日'}やることを書き出しておく`}</h2><p>${isT
-      ? '思いつくまま、どんどん書いてください。順番はこのあと決めます。'
+      ? '思いつくまま、どんどん書いてください。順番はこのあと決めます。別の日にやることは、右下の＋から日付を選んで入れられます。'
       : '思いついたら書いておきましょう。順番は当日の朝に決めます。'}</p></div></div>`;
     const all = [...list, ...fixed];
     if (all.length) h += `<ul class="dumplist">${all.map(t => `<li class="${S.fresh === t.id ? 'fresh' : ''}"><button data-act="edit" data-id="${t.id}"><span class="dot"></span><span class="title">${esc(t.title)}</span><span class="sub">${t.time ? `<span class="chip appt">${t.time}〜</span>` : ''}${t.date < d ? '<span class="carry">昨日から</span>' : ''}</span></button>${durSel(t)}</li>`).join('')}</ul><p class="note" style="text-align:left">右の時間は、かかりそうな時間の目安です。タップで変えられます。</p>`;
@@ -642,10 +655,11 @@ function renderPlan(d) {
 }
 
 function routineRowHTML(it, P, cur) {
+  const k = it.kind || 'am', open = k === 'pm' ? P.nOpen : P.rOpen;
   return `<li class="item routine${cur ? ' cur' : ''}">
     <div class="time mono">${fmt(it.start)}<small>${fmt(it.end)}</small></div>
     <span class="rt-ico" aria-hidden="true">${LOOP_SVG}</span>
-    <button class="body" data-act="rtJump"><span class="title">朝の固定タスク</span><span class="meta">${cur ? `<span class="chip cur">${cur}</span>` : ''}<span class="chip rt">残り${P.rOpen.length}つ</span><span class="chip">${durTxt(it.end - it.start)}</span></span></button>
+    <button class="body" data-act="rtJump" data-k="${k}"><span class="title">${RK[k].label}</span><span class="meta">${cur ? `<span class="chip cur">${cur}</span>` : ''}<span class="chip rt">残り${open.length}つ</span><span class="chip">${durTxt(it.end - it.start)}</span></span></button>
   </li>`;
 }
 function itemHTML(it, now, cur) {
@@ -656,12 +670,14 @@ function itemHTML(it, now, cur) {
     <button class="body" data-act="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span><span class="meta">${cur ? `<span class="chip cur">${cur}</span>` : ''}${past ? '<span class="chip late">時間が過ぎています</span>' : ''}${t.time ? '<span class="chip appt">予定</span>' : ''}<span class="chip">${durTxt(t.dur || 30)}</span></span></button>${t.time ? '' : GRIP}
   </li>`;
 }
-function routineCardHTML(P) {
-  const R = P.routines; if (!R.length) return '';
-  const doneN = R.length - P.rOpen.length, all = !P.rOpen.length;
-  return `<details class="routine" id="routine"${all ? '' : ' open'}>
-    <summary><span class="rt-h">朝の固定タスク</span><span class="rt-s mono${all ? ' ok' : ''}">${all ? 'すべて完了' : `${doneN}/${R.length}・残り${durTxt(sum(P.rOpen, r => r.dur || 10))}`}</span></summary>
-    <ul class="rlist">${R.map(r => { const on = !!P.rDone[r.id]; return `<li class="${on ? 'done' : ''}"><button class="check${on ? ' on' : ''}" data-act="rtToggle" data-rid="${esc(r.id)}" aria-label="「${esc(r.title)}」を${on ? '未完了に戻す' : '完了にする'}"></button><span class="title">${esc(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`; }).join('')}</ul>
+function routineCardHTML(P, k = 'am') {
+  const R = k === 'pm' ? P.nights : P.routines, open = k === 'pm' ? P.nOpen : P.rOpen, dn = k === 'pm' ? P.nDone : P.rDone;
+  if (!R.length) return '';
+  const doneN = R.length - open.length, all = !open.length;
+  const when = k === 'pm' ? `${esc(S.settings.nightStart || '22:00')}から・` : '';
+  return `<details class="routine" id="${RK[k].box}"${all ? '' : ' open'}>
+    <summary><span class="rt-h">${RK[k].label}</span><span class="rt-s mono${all ? ' ok' : ''}">${all ? 'すべて完了' : `${when}${doneN}/${R.length}・残り${durTxt(sum(open, r => r.dur || 10))}`}</span></summary>
+    <ul class="rlist">${R.map(r => { const on = !!dn[r.id]; return `<li class="${on ? 'done' : ''}"><button class="check${on ? ' on' : ''}" data-act="rtToggle" data-k="${k}" data-rid="${esc(r.id)}" aria-label="「${esc(r.title)}」を${on ? '未完了に戻す' : '完了にする'}"></button><span class="title">${esc(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`; }).join('')}</ul>
   </details>`;
 }
 // The day after "start": one timed list
@@ -693,13 +709,15 @@ function renderFlow(d) {
       <div class="row"><select class="dursel" id="flow-dur" aria-label="かかる時間">${durOptions(30)}</select><button class="btn small soft" data-act="flowAdd" data-pos="next">次にやる</button><button class="btn small gold" data-act="flowAdd" data-pos="last">最後に追加</button></div>
     </div>`;
   }
+  h += routineCardHTML(P, 'pm');
   if (P.overflow.length) {
     h += `<div class="notice"><div><b>締め切り（${esc(S.settings.dayEnd)}）までに入りきらないことがあります。</b></div><ul>${P.overflow.map(t => `<li>${esc(t.title)}（${durTxt(t.dur || 30)}）</li>`).join('')}</ul><div class="acts"><button class="btn small gold" data-act="overflowTmr">まとめて明日へ</button></div></div>`;
   }
-  const rAll = P.routines.length && !P.rOpen.length;
-  if (P.done.length || rAll || P.calDone.length) {
-    const rLog = rAll ? `<li><span class="mono muted">${hm(Math.max(...P.routines.map(r => P.rDone[r.id] || 0)))}</span><span class="rt-ico" aria-hidden="true">${LOOP_SVG}</span><span>朝の固定タスク（${P.routines.length}つ）</span></li>` : '';
-    h += `<details class="fold"${P.isToday ? '' : ' open'}><summary>終わったこと（${P.done.length + P.calDone.length + (rAll ? 1 : 0)}）</summary><div class="inner"><ul class="donelog">${rLog}${[
+  const rAll = P.routines.length && !P.rOpen.length, nAll = P.nights.length && !P.nOpen.length;
+  if (P.done.length || rAll || nAll || P.calDone.length) {
+    const rtLog = (R, dn, label) => `<li><span class="mono muted">${hm(Math.max(...R.map(r => dn[r.id] || 0)))}</span><span class="rt-ico" aria-hidden="true">${LOOP_SVG}</span><span>${label}（${R.length}つ）</span></li>`;
+    const rLog = (rAll ? rtLog(P.routines, P.rDone, '朝の固定タスク') : '') + (nAll ? rtLog(P.nights, P.nDone, '夜の固定タスク') : '');
+    h += `<details class="fold"${P.isToday ? '' : ' open'}><summary>終わったこと（${P.done.length + P.calDone.length + (rAll ? 1 : 0) + (nAll ? 1 : 0)}）</summary><div class="inner"><ul class="donelog">${rLog}${[
       ...P.done.map(t => ({ at: t.doneAt || 0, html: `<li><span class="mono muted">${hm(t.doneAt)}</span><button class="check on" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を未完了に戻す"></button><span>${esc(t.title)}</span></li>` })),
       ...P.calDone.map(c => ({ at: c.doneAt, html: `<li><span class="mono muted">${hm(c.doneAt)}</span><button class="check on" data-act="calToggle" data-cid="${esc(c.ev.id)}" aria-label="「${esc(c.ev.title)}」を未完了に戻す"></button><span>${esc(c.ev.title)}</span></li>` })),
     ].sort((a, b) => a.at - b.at).map(x => x.html).join('')}</ul></div></details>`;
@@ -718,16 +736,22 @@ function renderSettings() {
   const st = S.settings, R = st.routines || [];
   const durOpts = cur => [...new Set([...RT_DURS, cur])].sort((a, b) => a - b).map(m => `<option value="${m}"${m === cur ? ' selected' : ''}>${durTxt(m)}</option>`).join('');
   let h = `<div class="intro"><h1>設定</h1></div>`;
-  h += `<section class="panel" id="routines-panel"><h3>朝の固定タスク</h3><p class="lead">毎朝やることです。毎日リセットされ、一日の最初にまとめて時間を取ります。合計 ${durTxt(sum(R, r => r.dur || 10) || 0)}</p>
-    <ul class="rt-edit">${R.map((r, i) => `<li>
-      <input id="rt-title-${esc(r.id)}" value="${esc(r.title)}" aria-label="固定タスク名">
-      <select id="rt-dur-${esc(r.id)}" aria-label="かかる時間">${durOpts(r.dur || 10)}</select>
-      <button class="iconbtn sm" data-act="rtMove" data-dir="-1" data-rid="${esc(r.id)}" aria-label="上へ"${i === 0 ? ' disabled' : ''}>↑</button>
-      <button class="iconbtn sm" data-act="rtMove" data-dir="1" data-rid="${esc(r.id)}" aria-label="下へ"${i === R.length - 1 ? ' disabled' : ''}>↓</button>
-      <button class="textbtn" data-act="rtDel" data-rid="${esc(r.id)}">削除</button>
+  const editor = (k, lead, extra, ph) => {
+    const L = routinesOf(k), pre = RK[k].pre;
+    return `<section class="panel" id="${RK[k].panel}"><h3>${RK[k].label}</h3><p class="lead">${lead}合計 ${durTxt(sum(L, r => r.dur || 10) || 0)}</p>${extra}
+    <ul class="rt-edit">${L.map((r, i) => `<li>
+      <input id="${pre}-title-${esc(r.id)}" value="${esc(r.title)}" aria-label="固定タスク名">
+      <select id="${pre}-dur-${esc(r.id)}" aria-label="かかる時間">${durOpts(r.dur || 10)}</select>
+      <button class="iconbtn sm" data-act="rtMove" data-k="${k}" data-dir="-1" data-rid="${esc(r.id)}" aria-label="上へ"${i === 0 ? ' disabled' : ''}>↑</button>
+      <button class="iconbtn sm" data-act="rtMove" data-k="${k}" data-dir="1" data-rid="${esc(r.id)}" aria-label="下へ"${i === L.length - 1 ? ' disabled' : ''}>↓</button>
+      <button class="textbtn" data-act="rtDel" data-k="${k}" data-rid="${esc(r.id)}">削除</button>
     </li>`).join('')}</ul>
-    <div class="addline"><input id="rt-new" placeholder="例：神棚の水を替える" aria-label="固定タスクを追加"><select id="rt-new-dur" aria-label="かかる時間">${durOpts(10)}</select><button class="btn small gold" data-act="rtAdd">追加</button></div>
+    <div class="addline"><input id="${pre}-new" placeholder="${ph}" aria-label="${RK[k].label}を追加"><select id="${pre}-new-dur" aria-label="かかる時間">${durOpts(10)}</select><button class="btn small gold" data-act="rtAdd" data-k="${k}">追加</button></div>
   </section>`;
+  };
+  h += editor('am', '毎朝やることです。毎日リセットされ、一日の最初にまとめて時間を取ります。', '', '例：神棚の水を替える');
+  h += editor('pm', '夜に毎日やることです。毎日リセットされ、決めた時刻から時間を取ります。やることはこの時間を避けて並びます。',
+    `<div class="fields"><label class="field">始める時刻<input type="time" id="s-nightStart" value="${esc(st.nightStart || '22:00')}"></label></div>`, '例：明日やることを書き出す');
   h += `<section class="panel"><h3>一日の時間</h3><div class="fields">
     <label class="field">始める時刻<input type="time" id="s-dayStart" value="${esc(st.dayStart)}"></label>
     <label class="field">締め切り（日付をまたいでもOK）<input type="time" id="s-dayEnd" value="${esc(st.dayEnd)}"></label>
@@ -987,12 +1011,12 @@ function flowAdd(pos, refocus) {
 }
 // Keep the text box focused when its buttons are pressed with a mouse, so no re-render sneaks in between.
 $('#main').addEventListener('mousedown', e => { if (e.target.closest('[data-act="dumpAdd"], [data-act="toOrder"], [data-act="flowAdd"]')) e.preventDefault(); });
-function addRoutine() {
-  const inp = $('#rt-new'); const v = inp && inp.value.trim(); if (!v) { toast('名前を入れてください'); return; }
-  const dur = parseInt($('#rt-new-dur').value, 10) || 10;
+function addRoutine(k = 'am') {
+  const pre = RK[k].pre, inp = $('#' + pre + '-new'); const v = inp && inp.value.trim(); if (!v) { toast('名前を入れてください'); return; }
+  const dur = parseInt($('#' + pre + '-new-dur').value, 10) || 10;
   inp.value = ''; inp.blur();
-  S.settings = { ...S.settings, routines: [...(S.settings.routines || []), { id: 'r' + uid().slice(1), title: v, dur }] }; saveSettings();
-  toast('朝の固定タスクに追加しました');
+  S.settings = { ...S.settings, [RK[k].key]: [...routinesOf(k), { id: (k === 'pm' ? 'n' : 'r') + uid().slice(1), title: v, dur }] }; saveSettings();
+  toast(`${RK[k].label}に追加しました`);
 }
 $('#main').addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
@@ -1065,22 +1089,22 @@ $('#main').addEventListener('click', e => {
     if ((S.settings.routines || []).some(isEx)) { S.settings = { ...S.settings, routines: S.settings.routines.filter(r => !isEx(r)) }; saveSettings(); }
     render(); toast('サンプルを消しました');
   }
-  else if (act === 'rtToggle') toggleRoutine(S.viewDate, b.dataset.rid);
-  else if (act === 'rtJump') { const el = document.getElementById('routine'); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
-  else if (act === 'rtEdit') { S.view = 'settings'; render(); window.scrollTo(0, 0); }
-  else if (act === 'rtAdd') addRoutine();
-  else if (act === 'rtDel') { S.settings = { ...S.settings, routines: (S.settings.routines || []).filter(r => r.id !== b.dataset.rid) }; saveSettings(); }
+  else if (act === 'rtToggle') toggleRoutine(S.viewDate, b.dataset.rid, b.dataset.k || 'am');
+  else if (act === 'rtJump') { const el = document.getElementById(RK[b.dataset.k || 'am'].box); if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
+  else if (act === 'rtEdit') { S.view = 'settings'; render(); const el = document.getElementById(RK[b.dataset.k || 'am'].panel); if (el) el.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0); }
+  else if (act === 'rtAdd') addRoutine(b.dataset.k || 'am');
+  else if (act === 'rtDel') { const k = b.dataset.k || 'am'; S.settings = { ...S.settings, [RK[k].key]: routinesOf(k).filter(r => r.id !== b.dataset.rid) }; saveSettings(); }
   else if (act === 'rtMove') {
-    const l = [...(S.settings.routines || [])], i = l.findIndex(r => r.id === b.dataset.rid), j = i + +b.dataset.dir;
+    const k = b.dataset.k || 'am', l = [...routinesOf(k)], i = l.findIndex(r => r.id === b.dataset.rid), j = i + +b.dataset.dir;
     if (i < 0 || j < 0 || j >= l.length) return;
-    [l[i], l[j]] = [l[j], l[i]]; S.settings = { ...S.settings, routines: l }; saveSettings();
+    [l[i], l[j]] = [l[j], l[i]]; S.settings = { ...S.settings, [RK[k].key]: l }; saveSettings();
   }
 });
 $('#main').addEventListener('keydown', e => {
   if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
   if (e.target.id === 'dump-input') { if (e.metaKey || e.ctrlKey) { e.preventDefault(); dumpAdd(true); } }
   else if (e.target.id === 'flow-add') { e.preventDefault(); flowAdd('last', true); }
-  else if (e.target.id === 'rt-new') { e.preventDefault(); addRoutine(); }
+  else if (e.target.id === 'rt-new' || e.target.id === 'rn-new') { e.preventDefault(); addRoutine(e.target.id === 'rn-new' ? 'pm' : 'am'); }
 });
 $('#main').addEventListener('change', e => {
   const el = e.target, id = el.id || '';
@@ -1089,10 +1113,11 @@ $('#main').addEventListener('change', e => {
     if (t) { putTask({ ...t, dur: v }, true); toast(`「${t.title}」を${durTxt(v)}にしました`); }
     return;
   }
-  if (id.startsWith('rt-title-') || id.startsWith('rt-dur-')) {
-    const isT = id.startsWith('rt-title-'), rid = id.slice(isT ? 9 : 7), v = el.value.trim();
+  const rm = id.match(/^(rt|rn)-(title|dur)-(.+)$/);
+  if (rm) {
+    const k = rm[1] === 'rn' ? 'pm' : 'am', isT = rm[2] === 'title', rid = rm[3], v = el.value.trim();
     if (isT && !v) { toast('名前を空にはできません。消すときは「削除」を押してください'); return; }
-    S.settings = { ...S.settings, routines: (S.settings.routines || []).map(r => r.id === rid ? { ...r, [isT ? 'title' : 'dur']: isT ? v : parseInt(v, 10) || 10 } : r) };
+    S.settings = { ...S.settings, [RK[k].key]: routinesOf(k).map(r => r.id === rid ? { ...r, [isT ? 'title' : 'dur']: isT ? v : parseInt(v, 10) || 10 } : r) };
     saveSettings(); return;
   }
   if (!id.startsWith('s-')) return;

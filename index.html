@@ -110,7 +110,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .addrow:focus-within { border-style: solid; border-color: var(--gold); }
 /* Brain dump */
 .dumplist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.dumplist li { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; background: var(--surface); border-radius: 12px; padding-right: 10px; }
+.dumplist li { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 8px; align-items: center; background: var(--surface); border-radius: 12px; padding-right: 10px; }
 .dumplist button { width: 100%; display: grid; grid-template-columns: 8px minmax(0,1fr) auto; gap: 12px; align-items: center; background: none; border: 0; padding: 10px 0 10px 14px; text-align: left; }
 .dursel { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 999px; padding: 5px 8px; font-size: 13px; max-width: 110px; }
 .dursel:hover { border-color: var(--gold); }
@@ -263,6 +263,11 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
 .gstate { font-size: 13.5px; }
 .gstate.ok { color: var(--ok); font-weight: 700; }
 .gstate.ng { color: var(--warn); font-weight: 700; }
+.laterlist { list-style: none; margin: 0; padding: 0; display: grid; }
+.laterlist li { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14.5px; }
+.laterlist li:first-child { border-top: 0; }
+.laterlist .title { overflow-wrap: anywhere; }
+.laterlist .sub { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .modeline { font-size: 12px; color: var(--muted); text-align: center; }
 
 /* Bottom nav */
@@ -632,11 +637,12 @@ function renderPlan(d) {
       ? '思いつくまま、どんどん書いてください。順番はこのあと決めます。別の日にやることは、右下の＋から日付を選んで入れられます。'
       : '思いついたら書いておきましょう。順番は当日の朝に決めます。'}</p></div></div>`;
     const all = [...list, ...fixed];
-    if (all.length) h += `<ul class="dumplist">${all.map(t => `<li class="${S.fresh === t.id ? 'fresh' : ''}"><button data-act="edit" data-id="${t.id}"><span class="dot"></span><span class="title">${esc(t.title)}</span><span class="sub">${t.time ? `<span class="chip appt">${t.time}〜</span>` : ''}${t.date < d ? '<span class="carry">昨日から</span>' : ''}</span></button>${durSel(t)}</li>`).join('')}</ul><p class="note" style="text-align:left">右の時間は、かかりそうな時間の目安です。タップで変えられます。</p>`;
+    if (all.length) h += `<ul class="dumplist">${all.map(t => `<li class="${S.fresh === t.id ? 'fresh' : ''}"><button data-act="edit" data-id="${t.id}"><span class="dot"></span><span class="title">${esc(t.title)}</span><span class="sub">${t.time ? `<span class="chip appt">${t.time}〜</span>` : ''}${t.date < d ? '<span class="carry">昨日から</span>' : ''}</span></button>${durSel(t)}${d > todayStr() ? `<button class="later" data-act="pullToday" data-id="${t.id}">今日やる</button>` : ''}</li>`).join('')}</ul><p class="note" style="text-align:left">右の時間は、かかりそうな時間の目安です。タップで変えられます。</p>`;
     h += `<div class="dumpbox">
       <textarea id="dump-input" rows="4" placeholder="1行に1つずつ書いてください&#10;例）講座の構成を考える 90分&#10;　　確定申告の書類を集める&#10;　　新しい鑑定メニューの案出し" aria-label="やることを書き出す">${esc(S.draft[d] || '')}</textarea>
       <div class="row"><span>「60分」と書くと時間も入ります（なければ30分）</span><button class="btn small gold" data-act="dumpAdd">リストに入れる</button></div>
     </div>`;
+    if (isT) h += laterHTML();
     h += calPlanHTML(d);
     if (isT) h += `<button class="go" data-act="toOrder">書き出せた → 優先順位をつける</button>`;
     else h += `<p class="note">当日の朝に書き足してから、優先順位を決めます。</p>`;
@@ -646,6 +652,7 @@ function renderPlan(d) {
     h += `<div class="step"><span class="n">3</span><div><h2>優先順位をつける</h2><p>右の <b>⠿</b> を掴んで、大事なものを上へ動かしてください。上にあるものから先にやります。</p></div></div>`;
     h += `<ol class="sortlist" id="sortPlan">${list.map((t, i) => `<li data-id="${t.id}"${S.fresh === t.id ? ' class="fresh"' : ''}><span class="pos">${i + 1}</span><button class="info" data-act="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span>${t.date < d ? '<span class="sub"><span class="carry">昨日から</span></span>' : ''}</button>${durSel(t)}${GRIP}</li>`).join('')}</ol>`;
     h += `<div class="linkrow"><button class="textbtn" data-act="toDump">← 書き足す</button><span>タスクをタップすると、明日へ回したり消したりできます</span></div>`;
+    h += laterHTML();
     h += fixedHTML;
     h += calPlanHTML(d);
     h += `<button class="go" data-act="start">この順番で今日を始める</button>`;
@@ -709,6 +716,7 @@ function renderFlow(d) {
       <div class="row"><select class="dursel" id="flow-dur" aria-label="かかる時間">${durOptions(30)}</select><button class="btn small soft" data-act="flowAdd" data-pos="next">次にやる</button><button class="btn small gold" data-act="flowAdd" data-pos="last">最後に追加</button></div>
     </div>`;
   }
+  if (P.isToday) h += laterHTML();
   h += routineCardHTML(P, 'pm');
   if (P.overflow.length) {
     h += `<div class="notice"><div><b>締め切り（${esc(S.settings.dayEnd)}）までに入りきらないことがあります。</b></div><ul>${P.overflow.map(t => `<li>${esc(t.title)}（${durTxt(t.dur || 30)}）</li>`).join('')}</ul><div class="acts"><button class="btn small gold" data-act="overflowTmr">まとめて明日へ</button></div></div>`;
@@ -932,6 +940,21 @@ function calRowHTML(it, now, cur) {
   </li>`;
 }
 
+// ---------- tasks sent to tomorrow, pulled back to today ----------
+function laterHTML() {
+  const t1 = addDays(todayStr(), 1);
+  const list = [...S.tasks.values()].filter(t => !t.done && t.date === t1).sort(byOrder);
+  if (!list.length) return '';
+  return `<details class="fold" id="laterFold"${S.laterOpen ? ' open' : ''}><summary>明日に回したこと（${list.length}）</summary><div class="inner"><ul class="laterlist">${list.map(t => `<li><span class="title">${esc(t.title)}${t.time ? ` <span class="chip appt">${t.time}〜</span>` : ''}</span><span class="sub">${durTxt(t.dur || 30)}</span><button class="btn small gold" data-act="pullToday" data-id="${t.id}">今日やる</button></li>`).join('')}</ul></div></details>`;
+}
+function pullToday(id) {
+  const t = S.tasks.get(id); if (!t) return;
+  const t0 = todayStr();
+  S.fresh = id; putTask({ ...t, date: t0, order: nextOrder(t0) });
+  toast(dayDoc(t0).started ? '今日の最後に入れました。⠿ を掴めば好きな位置に動かせます' : '今日のやることに入れました');
+}
+$('#main').addEventListener('toggle', e => { if (e.target.id === 'laterFold') S.laterOpen = e.target.open; }, true);
+
 // ---------- drag to reorder ----------
 // Save the new order of untimed tasks from the order of rows on screen; timed appointments keep their times.
 function applyDomOrder(el) {
@@ -1050,6 +1073,7 @@ $('#main').addEventListener('click', e => {
     P.overflow.forEach(t => putTask({ ...t, date: nd, order: k++ }, true));
     render(); toast(`${P.overflow.length}件を明日へ回しました`);
   }
+  else if (act === 'pullToday') pullToday(id);
   else if (act === 'calRefresh') ensureCal(S.viewDate, true);
   else if (act === 'calToggle') toggleCal(S.viewDate, b.dataset.cid);
   else if (act === 'gcalCopy') {

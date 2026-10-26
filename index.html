@@ -298,9 +298,14 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
 .waitside.open .wbody { display: grid; }
 .wlead { margin: 0; font-size: 12.5px; color: var(--muted); }
 .wlist { list-style: none; margin: 0; padding: 0; display: grid; }
-.wlist li { display: grid; grid-template-columns: 26px minmax(0,1fr) auto; gap: 8px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.wlist { min-height: 8px; }
+.wlist:empty { min-height: 46px; border: 1px dashed var(--line); border-radius: 10px; display: grid; place-items: center; }
+.wlist:empty::before { content: "ここに ⠿ で掴んで置けます"; font-size: 12px; color: var(--muted); }
+.wlist li { display: grid; grid-template-columns: 26px minmax(0,1fr) auto 32px; gap: 6px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
 .wlist li:first-child { border-top: 0; }
 .wlist .check { width: 22px; height: 22px; }
+.wlist .grip { width: 32px; height: 32px; }
+.wlist li.drag-ghost, .timeline li.drag-ghost, .sortlist li.drag-ghost { opacity: .35; }
 .wt { border: 0; background: none; padding: 0; text-align: left; display: grid; gap: 2px; min-width: 0; cursor: pointer; }
 .wt .title { font-size: 14.5px; overflow-wrap: anywhere; }
 .wadd { display: flex; gap: 6px; }
@@ -421,6 +426,7 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
     <div id="editActs" hidden>
       <button type="button" class="btn small danger" id="delBtn">削除</button>
       <button type="button" class="btn small soft" id="tmrBtn">翌日へ回す</button>
+      <button type="button" class="btn small soft" id="waitBtn">タイミング待ちへ</button>
     </div>
     <div>
       <button type="button" class="btn soft" id="closeBtn">閉じる</button>
@@ -812,7 +818,7 @@ function renderUpcoming() {
     const items = list.filter(t => t.date === d).sort((a, b) => (a.time ? timeMin(a.time) : 1e5) - (b.time ? timeMin(b.time) : 1e5) || byOrder(a, b));
     h += `<section class="up-day"><div class="up-h"><b>${dateLabel(d)}</b><span class="rel">${relDays(d)}</span><button class="textbtn" data-act="openDay" data-date="${d}">この日を開く</button></div><ul class="uplist">${items.map(t => `<li${S.fresh === t.id ? ' class="fresh"' : ''}>
       <button class="upmain" data-act="edit" data-id="${t.id}"><span class="uptime${t.time ? ' set' : ''}">${t.time ? `${t.time}〜` : '時間未定'}</span><span class="t"><span class="title">${esc(t.title)}</span>${t.note ? `<span class="upnote">${esc(t.note)}</span>` : ''}<span class="upmeta">${durTxt(t.dur || 30)}</span></span></button>
-      <button class="later" data-act="pullToday" data-id="${t.id}">今日やる</button>
+      <span class="ctl"><button class="later" data-act="pullToday" data-id="${t.id}">今日やる</button><button class="later" data-act="toWait" data-id="${t.id}">待ちへ</button></span>
     </li>`).join('')}</ul></section>`;
   }
   h += `<div class="btnrow"><button class="btn soft" data-act="addLater">＋ 先のやることを入れる</button></div>`;
@@ -1043,11 +1049,17 @@ function waitPanelHTML() {
   return `<aside class="waitside${S.waitOpen ? ' open' : ''}" aria-label="タイミング待ち">
     <button class="whead" data-act="waitFold"><span><b>タイミング待ち</b><span class="cnt">${list.length}件</span></span></button>
     <div class="wbody">
-      <p class="wlead">相手の都合や連絡しだいで動くこと。優先順位はつけず、ここに置いておきます。</p>
-      ${list.length ? `<ul class="wlist">${list.map(t => `<li${S.fresh === t.id ? ' class="fresh"' : ''}><button class="check" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を終わったことにする"></button><button class="wt" data-act="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span>${t.note ? `<span class="upnote">${esc(t.note)}</span>` : ''}</button><button class="later" data-act="waitNow" data-id="${t.id}">今やる</button></li>`).join('')}</ul>` : ''}
+      <p class="wlead">相手の都合や連絡しだいで動くこと。優先順位はつけず、ここに置いておきます。⠿ を掴んで、今日のやることとの間で行き来できます。</p>
+      <ul class="wlist" id="waitList">${list.map(t => `<li data-id="${t.id}"${S.fresh === t.id ? ' class="fresh"' : ''}><button class="check" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を終わったことにする"></button><button class="wt" data-act="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span>${t.note ? `<span class="upnote">${esc(t.note)}</span>` : ''}</button><button class="later" data-act="waitNow" data-id="${t.id}">今やる</button>${GRIP}</li>`).join('')}</ul>
       <div class="wadd"><input id="wait-add" value="${esc(S.draft.wait || '')}" placeholder="例：伊藤さんに電話（夕方なら出られる）" aria-label="タイミング待ちを追加"><button class="btn small gold" data-act="waitAdd">追加</button></div>
     </div>
   </aside>`;
+}
+function moveToWait(id) {
+  const t = S.tasks.get(id); if (!t) return;
+  S.fresh = id; S.waitOpen = true;
+  putTask({ ...t, date: null, time: null, wait: true, order: 0 });
+  toast('タイミング待ちに移しました');
 }
 function waitAdd() {
   const inp = $('#wait-add'), v = ((inp && inp.value) || S.draft.wait || '').trim();
@@ -1074,14 +1086,23 @@ function wireDrag() {
     handle: '.grip', animation: 160, ghostClass: 'drag-ghost', chosenClass: 'drag-chosen',
     scroll: true, bubbleScroll: true, scrollSensitivity: 90, forceFallback: true, fallbackTolerance: 3,
     onStart: () => { S.dragging = true; document.body.classList.add('drag-on'); },
+    group: 'dandori',
     onEnd: e => {
       S.dragging = false; document.body.classList.remove('drag-on');
-      if (e.oldIndex !== e.newIndex) { applyDomOrder(e.from); S.fresh = e.item.dataset.id; toast('順番を入れ替えました'); }
+      const id = e.item.dataset.id, t = S.tasks.get(id);
+      if (e.from !== e.to && t) {
+        if (e.to.id === 'waitList') { S.pendingRender = false; moveToWait(id); return; }
+        // From the 置き場 into the list: it becomes a task for the day shown, at the drop position.
+        putTask({ ...t, wait: false, date: S.viewDate, time: null }, true);
+        applyDomOrder(e.to); S.fresh = id; toast('やることに入れました');
+      } else if (e.oldIndex !== e.newIndex && e.from.id !== 'waitList') { applyDomOrder(e.from); S.fresh = id; toast('順番を入れ替えました'); }
       S.pendingRender = false; render();
     },
   };
   const plan = document.getElementById('sortPlan'); if (plan) Sortable.create(plan, opts);
   const flow = document.getElementById('sortFlow'); if (flow) Sortable.create(flow, { ...opts, draggable: '.item.flex' });
+  const wl = document.getElementById('waitList');
+  if (wl && S.view === 'today' && (plan || flow)) Sortable.create(wl, { ...opts, sort: false });
 }
 
 // ---------- actions ----------
@@ -1183,6 +1204,7 @@ $('#main').addEventListener('click', e => {
   else if (act === 'pullToday') pullToday(id);
   else if (act === 'waitFold') { S.waitOpen = !S.waitOpen; render(); }
   else if (act === 'waitAdd') waitAdd();
+  else if (act === 'toWait') moveToWait(id);
   else if (act === 'waitNow') {
     const t = S.tasks.get(id); if (!t) return; const t0 = todayStr();
     S.fresh = id; putTask({ ...t, wait: false, date: t0, order: nextOrder(t0) });
@@ -1320,6 +1342,7 @@ function openSheet(id) {
   $('#sheetTitle').textContent = t ? '編集' : 'やることを追加';
   $('#saveBtn').textContent = t ? '保存' : '追加';
   $('#editActs').hidden = !t;
+  if (t) $('#waitBtn').textContent = isWait(t) ? '今日のやることへ' : 'タイミング待ちへ';
   $('#f-hint').hidden = !!t;
   syncSheet();
   $('#scrim').hidden = false; $('#sheet').hidden = false;
@@ -1363,6 +1386,12 @@ $('#delBtn').addEventListener('click', () => {
   if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'もう一度押すと削除'; setTimeout(() => { b.dataset.armed = ''; b.textContent = '削除'; }, 3000); return; }
   b.dataset.armed = ''; b.textContent = '削除';
   delTask(F.id); closeSheet(); toast('削除しました');
+});
+$('#waitBtn').addEventListener('click', () => {
+  const t = S.tasks.get(F.id); if (!t) return;
+  closeSheet();
+  if (isWait(t)) { const t0 = todayStr(); S.fresh = t.id; putTask({ ...t, wait: false, date: t0, order: nextOrder(t0) }); toast('今日のやることに入れました'); }
+  else moveToWait(t.id);
 });
 $('#tmrBtn').addEventListener('click', () => {
   const t = S.tasks.get(F.id); if (!t) return;

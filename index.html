@@ -287,6 +287,32 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
 .upmeta { font-size: 12px; color: var(--muted); }
 .notebox { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 8px 10px; font: inherit; font-size: 15px; color: var(--ink); resize: vertical; min-height: 64px; }
 .chip.memo { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+.col { display: grid; gap: 16px; min-width: 0; }
+.waitside { background: var(--surface); border-radius: 16px; padding: 12px 14px; display: grid; gap: 10px; border: 1px solid var(--line); }
+.whead { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: none; border: 0; padding: 0; width: 100%; text-align: left; cursor: pointer; }
+.whead b { font-family: var(--f-display); font-size: 16px; }
+.whead .cnt { font-size: 12px; color: var(--muted); margin-left: 6px; }
+.whead::after { content: "＋"; color: var(--muted); }
+.waitside.open .whead::after { content: "－"; }
+.wbody { display: none; gap: 8px; }
+.waitside.open .wbody { display: grid; }
+.wlead { margin: 0; font-size: 12.5px; color: var(--muted); }
+.wlist { list-style: none; margin: 0; padding: 0; display: grid; }
+.wlist li { display: grid; grid-template-columns: 26px minmax(0,1fr) auto; gap: 8px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.wlist li:first-child { border-top: 0; }
+.wlist .check { width: 22px; height: 22px; }
+.wt { border: 0; background: none; padding: 0; text-align: left; display: grid; gap: 2px; min-width: 0; cursor: pointer; }
+.wt .title { font-size: 14.5px; overflow-wrap: anywhere; }
+.wadd { display: flex; gap: 6px; }
+.wadd input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; font-size: 15px; color: var(--ink); }
+@media (min-width: 980px) {
+  .wrap { max-width: 1000px; grid-template-columns: minmax(0,1fr) 300px; align-items: start; column-gap: 28px; }
+  .col { grid-column: 1; grid-row: 1; }
+  .waitside { grid-column: 2; grid-row: 1; position: sticky; top: calc(16px + env(safe-area-inset-top, 0px)); max-height: calc(100vh - 130px); overflow-y: auto; }
+  .whead { cursor: default; }
+  .whead::after { content: none !important; }
+  .wbody { display: grid; }
+}
 .modeline { font-size: 12px; color: var(--muted); text-align: center; }
 
 /* Bottom nav */
@@ -375,6 +401,7 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
     <div class="opts">
       <button type="button" class="opt" data-f="date" data-v="today">今日</button>
       <button type="button" class="opt" data-f="date" data-v="tomorrow">明日</button>
+      <button type="button" class="opt" data-f="date" data-v="wait">タイミング待ち</button>
       <input type="date" id="f-date" aria-label="日付を選ぶ">
     </div>
   </div>
@@ -847,7 +874,7 @@ function renderSettings() {
 function render() {
   const main = $('#main'), a = document.activeElement;
   if (S.dragging || (a && main.contains(a) && a.matches('input, select, textarea'))) { S.pendingRender = true; return; }
-  main.innerHTML = importNotice() + (S.view === 'settings' ? renderSettings() : S.view === 'upcoming' ? renderUpcoming() : renderToday());
+  main.innerHTML = waitPanelHTML() + '<div class="col">' + importNotice() + (S.view === 'settings' ? renderSettings() : S.view === 'upcoming' ? renderUpcoming() : renderToday()) + '</div>';
   wireDrag();
   if (S.view === 'today') ensureCal(S.viewDate);
   S.fresh = null;
@@ -1006,6 +1033,32 @@ function pullToday(id) {
 }
 $('#main').addEventListener('toggle', e => { if (e.target.id === 'laterFold') S.laterOpen = e.target.open; }, true);
 
+// ---------- timing-dependent tasks ----------
+// Things that wait on someone else (a call when they are free, a reply before starting).
+// They have no date and no priority; they sit in their own panel until done or pulled in.
+const isWait = t => t.wait && !t.date && !t.done;
+function waitPanelHTML() {
+  if (S.view === 'settings') return '';
+  const list = [...S.tasks.values()].filter(isWait).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  return `<aside class="waitside${S.waitOpen ? ' open' : ''}" aria-label="タイミング待ち">
+    <button class="whead" data-act="waitFold"><span><b>タイミング待ち</b><span class="cnt">${list.length}件</span></span></button>
+    <div class="wbody">
+      <p class="wlead">相手の都合や連絡しだいで動くこと。優先順位はつけず、ここに置いておきます。</p>
+      ${list.length ? `<ul class="wlist">${list.map(t => `<li${S.fresh === t.id ? ' class="fresh"' : ''}><button class="check" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を終わったことにする"></button><button class="wt" data-act="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span>${t.note ? `<span class="upnote">${esc(t.note)}</span>` : ''}</button><button class="later" data-act="waitNow" data-id="${t.id}">今やる</button></li>`).join('')}</ul>` : ''}
+      <div class="wadd"><input id="wait-add" value="${esc(S.draft.wait || '')}" placeholder="例：伊藤さんに電話（夕方なら出られる）" aria-label="タイミング待ちを追加"><button class="btn small gold" data-act="waitAdd">追加</button></div>
+    </div>
+  </aside>`;
+}
+function waitAdd() {
+  const inp = $('#wait-add'), v = ((inp && inp.value) || S.draft.wait || '').trim();
+  if (!v) { toast('入れることを書いてください'); if (inp) inp.focus(); return; }
+  delete S.draft.wait; saveDraft();
+  if (inp) { inp.value = ''; inp.blur(); }
+  const t = { id: uid(), title: v, date: null, time: null, dur: 30, wait: true, done: false, doneAt: null, createdAt: Date.now(), order: 0 };
+  S.fresh = t.id; S.waitOpen = true; putTask(t);
+  toast('タイミング待ちに置きました');
+}
+
 // ---------- drag to reorder ----------
 // Save the new order of untimed tasks from the order of rows on screen; timed appointments keep their times.
 function applyDomOrder(el) {
@@ -1035,7 +1088,9 @@ function wireDrag() {
 function toggleDone(id) {
   const t = S.tasks.get(id); if (!t) return;
   const done = !t.done;
-  putTask({ ...t, done, doneAt: done ? Date.now() : null });
+  if (done && isWait(t)) putTask({ ...t, done, doneAt: Date.now(), date: todayStr(), fromWait: true });
+  else if (!done && t.fromWait) { const { fromWait, ...rest } = t; putTask({ ...rest, done, doneAt: null, date: null, wait: true }); }
+  else putTask({ ...t, done, doneAt: done ? Date.now() : null });
   if (done) toast('終わりました');
 }
 function dumpAdd(refocus) {
@@ -1059,6 +1114,7 @@ function dumpAdd(refocus) {
 $('#main').addEventListener('input', e => {
   if (e.target.id === 'dump-input') { S.draft[S.viewDate] = e.target.value; saveDraft(); }
   else if (e.target.id === 'flow-add') { S.draft['flow:' + S.viewDate] = e.target.value; saveDraft(); }
+  else if (e.target.id === 'wait-add') { S.draft.wait = e.target.value; saveDraft(); }
 });
 // Add one task after the day has started: right after the current one ("next") or at the end.
 function flowAdd(pos, refocus) {
@@ -1084,7 +1140,7 @@ function flowAdd(pos, refocus) {
   if (refocus) { const again = $('#flow-add'); if (again) again.focus(); }
 }
 // Keep the text box focused when its buttons are pressed with a mouse, so no re-render sneaks in between.
-$('#main').addEventListener('mousedown', e => { if (e.target.closest('[data-act="dumpAdd"], [data-act="toOrder"], [data-act="flowAdd"]')) e.preventDefault(); });
+$('#main').addEventListener('mousedown', e => { if (e.target.closest('[data-act="dumpAdd"], [data-act="toOrder"], [data-act="flowAdd"], [data-act="waitAdd"]')) e.preventDefault(); });
 function addRoutine(k = 'am') {
   const pre = RK[k].pre, inp = $('#' + pre + '-new'); const v = inp && inp.value.trim(); if (!v) { toast('名前を入れてください'); return; }
   const dur = parseInt($('#' + pre + '-new-dur').value, 10) || 10;
@@ -1125,6 +1181,13 @@ $('#main').addEventListener('click', e => {
     render(); toast(`${P.overflow.length}件を明日へ回しました`);
   }
   else if (act === 'pullToday') pullToday(id);
+  else if (act === 'waitFold') { S.waitOpen = !S.waitOpen; render(); }
+  else if (act === 'waitAdd') waitAdd();
+  else if (act === 'waitNow') {
+    const t = S.tasks.get(id); if (!t) return; const t0 = todayStr();
+    S.fresh = id; putTask({ ...t, wait: false, date: t0, order: nextOrder(t0) });
+    toast(dayDoc(t0).started ? '今日の最後に入れました。⠿ を掴めば好きな位置に動かせます' : '今日のやることに入れました');
+  }
   else if (act === 'openDay') { S.view = 'today'; S.viewDate = b.dataset.date; render(); window.scrollTo(0, 0); }
   else if (act === 'addLater') openSheet();
   else if (act === 'calRefresh') ensureCal(S.viewDate, true);
@@ -1181,6 +1244,7 @@ $('#main').addEventListener('keydown', e => {
   if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
   if (e.target.id === 'dump-input') { if (e.metaKey || e.ctrlKey) { e.preventDefault(); dumpAdd(true); } }
   else if (e.target.id === 'flow-add') { e.preventDefault(); flowAdd('last', true); }
+  else if (e.target.id === 'wait-add') { e.preventDefault(); waitAdd(); const i = $('#wait-add'); if (i) i.focus(); }
   else if (e.target.id === 'rt-new' || e.target.id === 'rn-new') { e.preventDefault(); addRoutine(e.target.id === 'rn-new' ? 'pm' : 'am'); }
 });
 $('#main').addEventListener('change', e => {
@@ -1238,18 +1302,19 @@ function syncSheet() {
   const e = eff(), t0 = todayStr(), t1 = addDays(t0, 1);
   document.querySelectorAll('#sheet [data-f]').forEach(b => {
     const f = b.dataset.f, v = b.dataset.v;
-    const on = f === 'date' ? (v === 'today' ? e.date === t0 : e.date === t1) : f === 'time' ? !e.time : +v === e.dur;
+    const on = f === 'date' ? (v === 'today' ? e.date === t0 : v === 'wait' ? e.date === 'WAIT' : e.date === t1) : f === 'time' ? !e.time : +v === e.dur;
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
-  $('#f-date').value = e.date || '';
+  $('#f-date').value = e.date && e.date !== 'WAIT' ? e.date : '';
   $('#f-time').value = e.time || '';
+  if (e.date === 'WAIT') { $('#f-preview').textContent = '→ タイミング待ち（優先順位をつけずに、横に置いておきます）'; return; }
   $('#f-preview').textContent = `→ ${relLabel(e.date) || dateLabel(e.date)} ・ ${e.time ? `${e.time}からの予定` : '順番の最後に入ります'} ・ ${durTxt(e.dur || 30)}`;
 }
 function openSheet(id) {
   const t = id ? S.tasks.get(id) : null;
   const t0 = todayStr();
   F.id = t ? t.id : null; F.parsed = {}; F.manual = {};
-  F.base = t ? { date: t.date || t0, time: t.time || null, dur: t.dur || 30 } : { date: S.view === 'upcoming' ? addDays(t0, 1) : S.viewDate < t0 ? t0 : S.viewDate, time: null, dur: 30 };
+  F.base = t ? { date: isWait(t) ? 'WAIT' : t.date || t0, time: t.time || null, dur: t.dur || 30 } : { date: S.view === 'upcoming' ? addDays(t0, 1) : S.viewDate < t0 ? t0 : S.viewDate, time: null, dur: 30 };
   $('#f-title').value = t ? t.title : '';
   $('#f-note').value = t ? t.note || '' : '';
   $('#sheetTitle').textContent = t ? '編集' : 'やることを追加';
@@ -1268,7 +1333,7 @@ $('#f-title').addEventListener('input', () => { if (!F.id) { const p = parseQuic
 $('#sheet').addEventListener('click', e => {
   const b = e.target.closest('[data-f]'); if (!b) return;
   const f = b.dataset.f, v = b.dataset.v;
-  if (f === 'date') F.manual.date = v === 'today' ? todayStr() : addDays(todayStr(), 1);
+  if (f === 'date') F.manual.date = v === 'today' ? todayStr() : v === 'wait' ? 'WAIT' : addDays(todayStr(), 1);
   else if (f === 'time') F.manual.time = null;
   else if (f === 'dur') F.manual.dur = +v;
   syncSheet();
@@ -1282,14 +1347,15 @@ function submitSheet() {
   const title = raw;
   if (!title) { toast('やることを入れてください'); $('#f-title').focus(); return; }
   const e = eff(), old = F.id ? S.tasks.get(F.id) : null;
-  const moved = !old || old.date !== e.date;
-  const t = { ...(old || {}), id: F.id || uid(), title, date: e.date, time: e.time || null, dur: e.dur || 30, done: old ? !!old.done : false, doneAt: old ? old.doneAt || null : null, createdAt: old ? old.createdAt : Date.now(), order: moved ? nextOrder(e.date) : old.order, note: $('#f-note').value.trim() };
+  const wait = e.date === 'WAIT', date = wait ? null : e.date;
+  const moved = !old || old.date !== date;
+  const t = { ...(old || {}), id: F.id || uid(), title, date, wait, time: wait ? null : e.time || null, dur: e.dur || 30, done: old ? !!old.done : false, doneAt: old ? old.doneAt || null : null, createdAt: old ? old.createdAt : Date.now(), order: moved ? (wait ? 0 : nextOrder(date)) : old.order, note: $('#f-note').value.trim() };
   if (old && old.example && title !== old.title) delete t.example;
   S.fresh = t.id; putTask(t);
   if (F.id) { closeSheet(); toast('保存しました'); }
   else {
     $('#f-title').value = ''; F.parsed = {}; F.manual = {}; F.base = { ...F.base, date: t.date }; $('#f-note').value = ''; syncSheet();
-    toast(`${relLabel(t.date) || dateLabel(t.date)}に入れました`);
+    toast(t.wait ? 'タイミング待ちに置きました' : `${relLabel(t.date) || dateLabel(t.date)}に入れました`);
   }
 }
 $('#delBtn').addEventListener('click', () => {
@@ -1300,8 +1366,8 @@ $('#delBtn').addEventListener('click', () => {
 });
 $('#tmrBtn').addEventListener('click', () => {
   const t = S.tasks.get(F.id); if (!t) return;
-  const nd = addDays(t.date < todayStr() ? todayStr() : t.date, 1);
-  putTask({ ...t, date: nd, order: nextOrder(nd) }); closeSheet(); toast(`${relLabel(nd) || dateLabel(nd)}へ回しました`);
+  const nd = addDays(!t.date || t.date < todayStr() ? todayStr() : t.date, 1);
+  putTask({ ...t, date: nd, wait: false, order: nextOrder(nd) }); closeSheet(); toast(`${relLabel(nd) || dateLabel(nd)}へ回しました`);
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#sheet').hidden) closeSheet();

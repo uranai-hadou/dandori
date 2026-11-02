@@ -318,6 +318,9 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
   .whead::after { content: none !important; }
   .wbody { display: grid; }
 }
+.calpick { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px; cursor: pointer; }
+.calpick input { width: 18px; height: 18px; accent-color: var(--gold); flex: none; }
+.calpick span { min-width: 0; overflow-wrap: anywhere; }
 .modeline { font-size: 12px; color: var(--muted); text-align: center; }
 
 /* Bottom nav */
@@ -866,6 +869,7 @@ function renderSettings() {
         <p class="lead"><b>すでにつないでいて、コードを新しくするとき</b>：Apps Script を開いてコードを全部貼り替えて保存 →（まだなら「サービス」に Google Calendar API を追加）→「デプロイ」→「デプロイを管理」→ 鉛筆マーク →「バージョン：新バージョン」→「デプロイ」。URLは変わらないので、貼り直しは要りません。</p>
         <textarea class="gcode" id="gcalCode" readonly aria-label="Apps Script のコード">${esc(gasCode(st.gcalToken || ''))}</textarea>
       </div></details>
+      ${on && (st.gcalSeen || []).length ? `<div class="frow"><span class="label">段取り帳に出すカレンダー（チェックを外すと出なくなります）</span>${(st.gcalSeen || []).map((n, i) => `<label class="calpick"><input type="checkbox" id="gcal-show-${i}"${(st.gcalHide || []).includes(n) ? '' : ' checked'}><span>${esc(n)}</span></label>`).join('')}</div>` : ''}
       <div class="addline"><input id="gcal-url" value="${esc(st.gcalUrl || '')}" placeholder="https://script.google.com/macros/s/…/exec" aria-label="ウェブアプリのURL"><button class="btn small gold" data-act="gcalConnect">${on ? '更新' : 'つなぐ'}</button></div>
       ${on ? '<div><button class="textbtn" data-act="gcalOff">連携をやめる</button></div>' : ''}
     </section>`;
@@ -984,6 +988,8 @@ async function ensureCal(d, force) {
     const j = await res.json();
     if (!j || j.error || !Array.isArray(j.events)) throw new Error(j && j.error === 'token' ? 'token' : 'format');
     S.cal[d] = { at: Date.now(), events: j.events, v: j.v || 1, meet: !!j.meet };
+    const seen = S.settings.gcalSeen || [], fresh = [...new Set(j.events.map(ev => ev.cal).filter(n => n && !seen.includes(n)))];
+    if (fresh.length) { S.settings = { ...S.settings, gcalSeen: [...seen, ...fresh] }; saveSettings(); }
     S.calError = '';
     if (force) toast(`Googleカレンダーから${j.events.length}件の予定を読み込みました`);
   } catch (e) {
@@ -998,7 +1004,9 @@ function calEvents(d) {
   const c = calOn() && S.cal[d]; if (!c) return { timed: [], allDay: [] };
   const base = parseYmd(d).getTime(), lo = rollover(), hi = 1440 + rollover();
   const timed = [], allDay = [];
+  const hide = S.settings.gcalHide || [];
   for (const ev of c.events) {
+    if (hide.includes(ev.cal)) continue;
     const s = (ev.start - base) / 60000, e = (ev.end - base) / 60000;
     if (ev.allDay) { if (e > 0 && s < 1440) allDay.push(ev); continue; }
     if (e > lo && s < hi) timed.push({ ...ev, s: Math.max(s, lo), e: Math.min(e, hi) });
@@ -1271,6 +1279,13 @@ $('#main').addEventListener('keydown', e => {
 });
 $('#main').addEventListener('change', e => {
   const el = e.target, id = el.id || '';
+  if (id.startsWith('gcal-show-')) {
+    const n = (S.settings.gcalSeen || [])[+id.slice(10)]; if (n == null) return;
+    const hide = new Set(S.settings.gcalHide || []); if (el.checked) hide.delete(n); else hide.add(n);
+    S.settings = { ...S.settings, gcalHide: [...hide] }; saveSettings();
+    toast(el.checked ? `「${n}」を出すようにしました` : `「${n}」を出さないようにしました`);
+    return;
+  }
   if (id.startsWith('dur-')) {
     const t = S.tasks.get(id.slice(4)), v = parseInt(el.value, 10) || 30;
     if (t) { putTask({ ...t, dur: v }, true); toast(`「${t.title}」を${durTxt(v)}にしました`); }

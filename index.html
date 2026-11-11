@@ -502,6 +502,7 @@ S.viewDate = todayStr();
 // Google Calendar events (web version only), cached per date in this browser.
 S.cal = (() => { try { return JSON.parse(localStorage.getItem('dandori.cal')) || {}; } catch (e) { return {}; } })();
 S.calLoading = {};
+S.tomb = {};
 function saveCal() {
   try { const keep = Object.keys(S.cal).sort().slice(-14); localStorage.setItem('dandori.cal', JSON.stringify(Object.fromEntries(keep.map(k => [k, S.cal[k]])))); } catch (e) {}
 }
@@ -511,22 +512,23 @@ const DRAFT = 'dandori.draft';
 S.draft = (() => { try { return JSON.parse(localStorage.getItem(DRAFT)) || {}; } catch (e) { return {}; } })();
 function saveDraft() { try { localStorage.setItem(DRAFT, JSON.stringify(S.draft)); } catch (e) {} }
 function loadCache() { try { const raw = localStorage.getItem(LS); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
-function saveCache() { try { localStorage.setItem(LS, JSON.stringify({ tasks: [...S.tasks.values()], days: [...S.days.values()], settings: S.settings, mode: S.mode })); } catch (e) {} }
+function saveCache() { try { localStorage.setItem(LS, JSON.stringify({ tasks: [...S.tasks.values()], days: [...S.days.values()], settings: S.settings, tomb: S.tomb, mode: S.mode })); } catch (e) {} }
 const chains = {};
 function write(path, op) {
   saveCache();
-  if (S.mode !== 'cloud') return;
+  if (S.mode !== 'cloud') { scheduleSync(); return; }
   chains[path] = (chains[path] || Promise.resolve()).then(() => op(S.db.doc(path))).catch(e => {
     toast(e && e.code === 'quota_exceeded' ? '保存容量がいっぱいです。終わったことを削除してください' : '保存できませんでした。通信を確認して、もう一度操作してください');
   });
 }
 function bodyOf(t) { const { id, ...b } = t; return JSON.parse(JSON.stringify(b)); }
-function putTask(t, quiet) { S.tasks.set(t.id, t); if (!quiet) render(); write('tasks/' + t.id, r => r.set(bodyOf(t))); }
-function delTask(id) { S.tasks.delete(id); render(); write('tasks/' + id, r => r.delete()); }
-function saveSettings() { saveCache(); render(); write('settings/main', r => r.set(JSON.parse(JSON.stringify(S.settings)))); }
+function putTask(t, quiet) { t = { ...t, u: Date.now() }; delete S.tomb[t.id]; S.tasks.set(t.id, t); if (!quiet) render(); write('tasks/' + t.id, r => r.set(bodyOf(t))); }
+function forget(id) { S.tasks.delete(id); S.tomb[id] = Date.now(); }
+function delTask(id) { forget(id); render(); write('tasks/' + id, r => r.delete()); }
+function saveSettings(stamp = true) { if (stamp) S.settings = { ...S.settings, u: Date.now() }; saveCache(); render(); write('settings/main', r => r.set(JSON.parse(JSON.stringify(S.settings)))); }
 const dayDoc = d => S.days.get(d) || { date: d };
 function setDay(d, patch, quiet) {
-  const doc = { ...dayDoc(d), ...patch, date: d };
+  const doc = { ...dayDoc(d), ...patch, date: d, u: Date.now() };
   S.days.set(d, doc); if (!quiet) render();
   write('days/' + d, r => r.set(JSON.parse(JSON.stringify(doc))));
 }
@@ -568,6 +570,7 @@ function sampleTasks() {
 async function init() {
   const c = loadCache();
   if (c && Array.isArray(c.tasks)) { c.tasks.forEach(t => S.tasks.set(t.id, t)); S.settings = { ...DEF, ...(c.settings || {}) }; }
+  if (c && c.tomb) S.tomb = c.tomb;
   if (c && Array.isArray(c.days)) c.days.forEach(x => x && x.date && S.days.set(x.date, x));
   render();
   let db = null;
@@ -578,7 +581,7 @@ async function init() {
     S.importData = readImport();
     ensureToken();
     window.addEventListener('hashchange', () => { S.importData = readImport(); render(); });
-    saveCache(); render(); return;
+    saveCache(); render(); syncNow(); return;
   }
   S.db = db; S.mode = 'cloud';
   db.collection('tasks').limit(1000).onSnapshot(snap => {
@@ -675,7 +678,7 @@ function exampleNotice() {
   if (![...S.tasks.values()].some(t => t.example) && !(S.settings.routines || []).some(isEx)) return '';
   return `<div class="notice gold"><div>「（例）」は使い方を見るためのサンプルです。試したら消してください。</div><div class="acts"><button class="btn small soft" data-act="clearEx">サンプルをすべて消す</button></div></div>`;
 }
-const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? 'このブラウザの中だけに保存しています' : '接続しています…'}</div>`;
+const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? (syncOn() ? syncLine() : 'このブラウザの中だけに保存しています（Googleカレンダー連携をすると、スマホ・パソコンで自動同期します）') : '接続しています…'}</div>`;
 
 // Morning check-in (today before starting) and evening prep (future days)
 function renderPlan(d) {
@@ -863,6 +866,7 @@ function renderSettings() {
     h += `<section class="panel" id="gcal-panel"><h3>Googleカレンダー連携</h3>
       <p class="lead">Googleカレンダーの予定を読み込んで、その時間を避けてやることを並べます。読み取るだけで、カレンダーを書き換えることはありません。</p>
       <div class="gstate ${on ? (S.calError ? 'ng' : 'ok') : ''}">${on ? (S.calError ? (S.calError === 'token' ? 'つながっていません：合言葉が合いません（手順1〜3をやり直してください）' : 'つながっていません：URLか通信を確認してください') : `つながっています${c && c.at ? `（${hm(c.at)}に読み込み・今日の予定 ${c.events.filter(e => !e.allDay).length}件）` : ''}${c && c.at && !c.failed && (c.v || 1) < 2 ? '<br><span class="carry">コードが古いため、Meetのリンクが出ません。下の「コードを新しくするとき」の手順で更新してください。</span>' : c && c.v >= 2 && !c.meet ? '<br><span class="carry">Meetのリンクを出すには、Apps Script の「サービス」に Google Calendar API を追加して、新バージョンでデプロイしてください。</span>' : ''}`) : 'まだつながっていません'}</div>
+      ${on ? `<div class="gstate${S.syncErr ? ' ng' : ''}">${syncLine()}</div>` : ''}
       <details class="fold"${on ? '' : ' open'}><summary>つなぎ方（最初の1回だけ・3分ほど）</summary><div class="inner">
         <ol class="gsteps">
           <li>下の「コードをコピー」を押します。<div style="margin-top:6px"><button class="btn small gold" data-act="gcalCopy">コードをコピー</button></div></li>
@@ -872,7 +876,7 @@ function renderSettings() {
           <li>許可を求められたら自分のアカウントを選んで許可します。「このアプリは Google で確認されていません」と出たら、「詳細」→「（プロジェクト名）に移動」で進めます。自分で作ったものなので大丈夫です。</li>
           <li>最後に出る「ウェブアプリのURL」（https://script.google.com/macros/s/…/exec）をコピーして、下に貼り付けて「つなぐ」を押します。</li>
         </ol>
-        <p class="lead"><b>すでにつないでいて、コードを新しくするとき</b>：Apps Script を開いてコードを全部貼り替えて保存 →（まだなら「サービス」に Google Calendar API を追加）→「デプロイ」→「デプロイを管理」→ 鉛筆マーク →「バージョン：新バージョン」→「デプロイ」。URLは変わらないので、貼り直しは要りません。</p>
+        <p class="lead"><b>すでにつないでいて、コードを新しくするとき</b>：Apps Script を開いてコードを全部貼り替えて保存 →（まだなら「サービス」に Google Calendar API を追加）→「デプロイ」→「デプロイを管理」→ 鉛筆マーク →「バージョン：新バージョン」→「デプロイ」。URLは変わらないので、貼り直しは要りません。デプロイのときに「Google ドライブ」への許可を求められたら許可してください（スマホ・パソコンの自動同期で、段取り帳のデータをドライブの1ファイルに保存するのに使います）。<br><b>2台目の端末</b>は、URLを貼るのではなく、つないだ端末の「引っ越し用リンク」を一度だけ開いてください。それ以降は自動で同期します。</p>
         <textarea class="gcode" id="gcalCode" readonly aria-label="Apps Script のコード">${esc(gasCode(st.gcalToken || ''))}</textarea>
       </div></details>
       ${on && (st.gcalSeen || []).length ? `<div class="frow"><span class="label">段取り帳に出すカレンダー（チェックを外すと出なくなります）</span>${(st.gcalSeen || []).map((n, i) => `<label class="calpick"><input type="checkbox" id="gcal-show-${i}"${(st.gcalHide || []).includes(n) ? '' : ' checked'}><span>${esc(n)}</span></label>`).join('')}</div>` : ''}
@@ -943,7 +947,7 @@ function doGet(e) {
         link: linkIn(ev.getLocation()) || linkIn(ev.getDescription()) });
     });
   });
-  return out({ v: 2, meet: api, events });
+  return out({ v: 3, meet: api, events });
 }
 // With the "Google Calendar API" service added, Meet links come from the event itself.
 function listByApi(cal, from, to, events) {
@@ -967,6 +971,28 @@ function listByApi(cal, from, to, events) {
 function linkIn(text) {
   const m = String(text || '').match(/https:\\/\\/(meet\\.google\\.com\\/[a-z0-9-]+|[\\w.-]*zoom\\.us\\/[^\\s"<>]+|teams\\.microsoft\\.com\\/[^\\s"<>]+)/i);
   return m ? m[0] : '';
+}
+// 段取り帳のデータ同期：Googleドライブの1ファイルに保存し、端末ごとの変更を項目単位で新しい方を残して合わせる
+function doPost(e) {
+  let body; try { body = JSON.parse(e.postData.contents); } catch (err) { return out({ error: 'format' }); }
+  if (body.token !== TOKEN) return out({ error: 'token' });
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try { const merged = mergeData(loadData(), body.data || {}); saveData(merged); return out({ ok: true, v: 3, data: merged }); }
+  finally { lock.releaseLock(); }
+}
+function dataFile() {
+  const props = PropertiesService.getScriptProperties(), id = props.getProperty('FILE_ID');
+  if (id) { try { return DriveApp.getFileById(id); } catch (err) {} }
+  const f = DriveApp.createFile('朝の段取り帳-データ.json', '{}', MimeType.PLAIN_TEXT);
+  props.setProperty('FILE_ID', f.getId()); return f;
+}
+function loadData() { try { return JSON.parse(dataFile().getBlob().getDataAsString() || '{}'); } catch (err) { return {}; } }
+function saveData(d) { dataFile().setContent(JSON.stringify(d)); }
+function mergeData(a, b) {
+  const pick = (x, y) => !x ? y : !y ? x : ((y.u || 0) > (x.u || 0) ? y : x);
+  const byKey = (la, lb, k) => { const m = {}; (la || []).forEach(x => { if (x && x[k]) m[x[k]] = x; }); (lb || []).forEach(y => { if (y && y[k]) m[y[k]] = pick(m[y[k]], y); }); return Object.keys(m).map(key => m[key]); };
+  const old = Date.now() - 60 * 864e5;
+  return { tasks: byKey(a.tasks, b.tasks, 'id').filter(t => !(t.deleted && (t.u || 0) < old)), days: byKey(a.days, b.days, 'date'), settings: pick(a.settings, b.settings) || {} };
 }
 function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 `;
@@ -1102,10 +1128,54 @@ function ensureDaily(d) {
 function syncDaily(rid, patch) {
   const t0 = todayStr();
   [...S.tasks.values()].filter(t => t.fromDaily === rid && !t.done && t.date && t.date >= t0).forEach(t => {
-    if (patch === null) { S.tasks.delete(t.id); write('tasks/' + t.id, r => r.delete()); }
+    if (patch === null) { forget(t.id); write('tasks/' + t.id, r => r.delete()); }
     else putTask({ ...t, ...patch }, true);
   });
 }
+
+// ---------- sync between devices (web version, through the user's Apps Script) ----------
+const syncOn = () => S.mode === 'local' && !!S.settings.gcalUrl;
+let syncTimer = null, syncing = false, syncAgain = false;
+function scheduleSync(ms = 1500) { if (!syncOn()) return; clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, ms); }
+function mergeState(a, b) {
+  const pick = (x, y) => !x ? y : !y ? x : ((y.u || 0) > (x.u || 0) ? y : x);
+  const byKey = (la, lb, k) => { const m = new Map(); (la || []).forEach(x => x && x[k] && m.set(x[k], x)); (lb || []).forEach(y => y && y[k] && m.set(y[k], pick(m.get(y[k]), y))); return [...m.values()]; };
+  return { tasks: byKey(a.tasks, b.tasks, 'id'), days: byKey(a.days, b.days, 'date'), settings: pick(a.settings, b.settings) || {} };
+}
+const localState = () => ({ tasks: [...S.tasks.values(), ...Object.entries(S.tomb).map(([id, u]) => ({ id, deleted: true, u }))], days: [...S.days.values()], settings: S.settings });
+async function syncNow() {
+  if (!syncOn()) return;
+  if (syncing) { syncAgain = true; return; }
+  syncing = true;
+  try {
+    const res = await fetch(S.settings.gcalUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ token: S.settings.gcalToken, data: localState() }) });
+    const text = await res.text();
+    let j; try { j = JSON.parse(text); } catch (e) { throw new Error(/doPost/.test(text) ? 'old' : 'net'); }
+    if (!j || j.error || !j.data) throw new Error(j && j.error === 'token' ? 'token' : 'net');
+    // Keep anything changed on this device while the request was in flight.
+    const m = mergeState(j.data, localState());
+    S.tasks = new Map(); S.tomb = {};
+    m.tasks.forEach(t => { if (t.deleted) S.tomb[t.id] = t.u || 0; else S.tasks.set(t.id, t); });
+    S.days = new Map(m.days.map(x => [x.date, x]));
+    S.settings = { ...DEF, ...m.settings, gcalUrl: S.settings.gcalUrl, gcalToken: S.settings.gcalToken };
+    S.syncAt = Date.now(); S.syncErr = '';
+    saveCache();
+  } catch (e) {
+    S.syncErr = e.message === 'token' || e.message === 'old' ? e.message : 'net';
+  } finally {
+    syncing = false; render();
+    if (syncAgain) { syncAgain = false; scheduleSync(500); }
+  }
+}
+function syncLine() {
+  if (!syncOn()) return '';
+  if (S.syncErr === 'old') return '端末の間の同期：Apps Script のコードが古いため止まっています（設定の「コードを新しくするとき」を見てください）';
+  if (S.syncErr === 'token') return '端末の間の同期：この端末の合言葉が違います。つないだ端末から「引っ越し用リンク」を送ってください';
+  if (S.syncErr) return '端末の間の同期：通信できませんでした（自動で再試行します）';
+  return S.syncAt ? `スマホ・パソコンと同期済み（${hm(S.syncAt)}）` : '同期しています…';
+}
+setInterval(() => { if (!document.hidden) syncNow(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
 
 // ---------- drag to reorder ----------
 // Save the new order of untimed tasks from the order of rows on screen; timed appointments keep their times.
@@ -1261,7 +1331,7 @@ $('#main').addEventListener('click', e => {
     const inp = $('#gcal-url'), v = (inp && inp.value || '').trim();
     if (!/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(v)) { toast('「https://script.google.com/macros/s/…/exec」の形のURLを貼り付けてください'); return; }
     if (inp) inp.blur();
-    S.settings = { ...S.settings, gcalUrl: v }; S.cal = {}; S.calError = ''; saveCal(); saveSettings();
+    S.settings = { ...S.settings, gcalUrl: v }; S.cal = {}; S.calError = ''; saveCal(); saveSettings(false); syncNow();
     ensureCal(todayStr(), true);
   }
   else if (act === 'gcalOff') { S.settings = { ...S.settings, gcalUrl: '' }; S.cal = {}; S.calError = ''; saveCal(); saveSettings(); toast('連携をやめました'); }
@@ -1285,7 +1355,7 @@ $('#main').addEventListener('click', e => {
     catch (e) { box.select(); toast('リンクを長押ししてコピーしてください'); }
   }
   else if (act === 'clearEx') {
-    [...S.tasks.values()].filter(t => t.example).forEach(t => { S.tasks.delete(t.id); write('tasks/' + t.id, r => r.delete()); });
+    [...S.tasks.values()].filter(t => t.example).forEach(t => { forget(t.id); write('tasks/' + t.id, r => r.delete()); });
     if ((S.settings.routines || []).some(isEx)) { S.settings = { ...S.settings, routines: S.settings.routines.filter(r => !isEx(r)) }; saveSettings(); }
     render(); toast('サンプルを消しました');
   }

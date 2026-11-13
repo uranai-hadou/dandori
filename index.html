@@ -679,7 +679,7 @@ function exampleNotice() {
   if (![...S.tasks.values()].some(t => t.example) && !(S.settings.routines || []).some(isEx)) return '';
   return `<div class="notice gold"><div>「（例）」は使い方を見るためのサンプルです。試したら消してください。</div><div class="acts"><button class="btn small soft" data-act="clearEx">サンプルをすべて消す</button></div></div>`;
 }
-const APP_VER = '11/13-5';
+const APP_VER = '11/13-6';
 const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? (syncOn() ? syncLine() : 'このブラウザの中だけに保存しています（Googleカレンダー連携をすると、スマホ・パソコンで自動同期します）') : '接続しています…'}<br><span style="opacity:.6">版：${APP_VER}・${location.hostname.includes('github.io') ? 'ウェブ版' : 'claude.ai版'}</span></div>`;
 
 // Morning check-in (today before starting) and evening prep (future days)
@@ -922,13 +922,13 @@ $('#main').addEventListener('focusout', () => {
 const b64e = str => { let bin = ''; new TextEncoder().encode(str).forEach(b => { bin += String.fromCharCode(b); }); return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
 const b64d = str => new TextDecoder().decode(Uint8Array.from(atob(str.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)));
 function readImport() {
-  const h = decodeURIComponent(location.hash || '');
+  const h = decodeURIComponent((location.search || '') + (location.hash || ''));
   const j = h.match(/join=([A-Za-z0-9_-]+)/);
   if (j) { try { const o = JSON.parse(b64d(j[1])); return o && o.url && o.token ? { join: true, ...o } : null; } catch (e) { return null; } }
   const m = h.match(/setup=([A-Za-z0-9_-]+)/); if (!m) return null;
   try { const o = JSON.parse(b64d(m[1])); return o && typeof o === 'object' && Array.isArray(o.tasks) ? o : null; } catch (e) { return null; }
 }
-const joinLink = () => location.origin + location.pathname + '#join=' + b64e(JSON.stringify({ url: S.settings.gcalUrl, token: S.settings.gcalToken }));
+const joinLink = () => location.origin + location.pathname + '?join=' + b64e(JSON.stringify({ url: S.settings.gcalUrl, token: S.settings.gcalToken }));
 function importNotice() {
   const o = S.importData; if (!o) return '';
   if (o.join) return `<div class="notice gold"><div><b>この端末を、もう1台とつなぎますか？</b><br>つなぐと、やること・固定タスク・設定が自動でそろいます。この端末にだけあるやることも消えずに残ります。</div><div class="acts"><button class="btn small gold" data-act="joinYes">つなぐ</button><button class="btn small soft" data-act="importNo">やめる</button></div></div>`;

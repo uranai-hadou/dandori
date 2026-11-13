@@ -937,6 +937,7 @@ function setup() { dataFile(); CalendarApp.getDefaultCalendar(); Logger.log('準
 function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.token !== TOKEN) return out({ error: 'token' });
+  if (p.diag) { try { dataFile(); return out({ ok: true, v: 3 }); } catch (err) { return out({ v: 3, error: 'drive', msg: String(err && err.message || err) }); } }
   const from = new Date(Number(p.from)), to = new Date(Number(p.to));
   const api = typeof Calendar !== 'undefined';
   const events = [];
@@ -1167,16 +1168,30 @@ async function syncNow() {
     saveCache();
   } catch (e) {
     S.syncErr = ['token', 'old', 'server'].includes(e.message) ? e.message : 'net';
+    if (S.syncErr === 'net') S.syncErr = await syncDiag();
   } finally {
     syncing = false; render();
     if (syncAgain) { syncAgain = false; scheduleSync(500); }
   }
 }
+// When the POST can't be read, ask the GET side what is wrong (GET answers are readable).
+async function syncDiag() {
+  try {
+    const r = await fetch(S.settings.gcalUrl + '?diag=1&token=' + encodeURIComponent(S.settings.gcalToken));
+    const j = JSON.parse(await r.text());
+    if (j.error === 'token') return 'token';
+    if ((j.v || 1) < 3) return 'old';
+    if (j.error === 'drive') { S.syncMsg = j.msg || ''; return 'server'; }
+    return j.ok ? 'post' : 'net';
+  } catch (e) { return 'url'; }
+}
 function syncLine() {
   if (!syncOn()) return '';
-  if (S.syncErr === 'old') return '端末の間の同期：Apps Script のコードが古いため止まっています（設定の「コードを新しくするとき」を見てください）';
+  if (S.syncErr === 'old') return '端末の間の同期：Apps Script がまだ古いコードのまま動いています。コードを貼り替えたあと「デプロイを管理」→鉛筆→「新バージョン」→「デプロイ」をしてください（「新しいデプロイ」だとURLが変わり、古いURLは古いままです）';
   if (S.syncErr === 'token') return '端末の間の同期：この端末の合言葉が違います。つないだ端末から「引っ越し用リンク」を送ってください';
   if (S.syncErr === 'server') return '端末の間の同期：Apps Script でエラーが出ています（' + esc(S.syncMsg || '') + '）。Apps Script で setup を実行して許可してください';
+  if (S.syncErr === 'url') return '端末の間の同期：Apps Script につながりません。ネットの接続か、デプロイの「アクセスできるユーザー」が「全員」になっているかを確認してください';
+  if (S.syncErr === 'post') return '端末の間の同期：Apps Script とドライブは使えますが、保存の通信だけ失敗しています（自動で再試行します）';
   if (S.syncErr) return '端末の間の同期：つながりませんでした。Apps Script で「setup」を実行して許可したあと、新バージョンでデプロイしてください（設定の「コードを新しくするとき」）';
   return S.syncAt ? `スマホ・パソコンと同期済み（${hm(S.syncAt)}）` : '同期しています…';
 }

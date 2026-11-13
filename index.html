@@ -678,7 +678,7 @@ function exampleNotice() {
   if (![...S.tasks.values()].some(t => t.example) && !(S.settings.routines || []).some(isEx)) return '';
   return `<div class="notice gold"><div>「（例）」は使い方を見るためのサンプルです。試したら消してください。</div><div class="acts"><button class="btn small soft" data-act="clearEx">サンプルをすべて消す</button></div></div>`;
 }
-const APP_VER = '2026-11-13';
+const APP_VER = '11/13-3';
 const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? (syncOn() ? syncLine() : 'このブラウザの中だけに保存しています（Googleカレンダー連携をすると、スマホ・パソコンで自動同期します）') : '接続しています…'}<br><span style="opacity:.6">版：${APP_VER}・${location.hostname.includes('github.io') ? 'ウェブ版' : 'claude.ai版'}</span></div>`;
 
 // Morning check-in (today before starting) and evening prep (future days)
@@ -1192,7 +1192,7 @@ function syncLine() {
   if (S.syncErr === 'server') return '端末の間の同期：Apps Script でエラーが出ています（' + esc(S.syncMsg || '') + '）。Apps Script で setup を実行して許可してください';
   if (S.syncErr === 'url') return '端末の間の同期：Apps Script につながりません。ネットの接続か、デプロイの「アクセスできるユーザー」が「全員」になっているかを確認してください';
   if (S.syncErr === 'post') return '端末の間の同期：Apps Script とドライブは使えますが、保存の通信だけ失敗しています（自動で再試行します）';
-  if (S.syncErr) return '端末の間の同期：つながりませんでした。Apps Script で「setup」を実行して許可したあと、新バージョンでデプロイしてください（設定の「コードを新しくするとき」）';
+  if (S.syncErr) return '端末の間の同期：つながりませんでした。<button class="btn small gold" data-act="syncCheck" style="margin:6px 0 0">原因を見る</button>';
   return S.syncAt ? `スマホ・パソコンと同期済み（${hm(S.syncAt)}）` : '同期しています…';
 }
 setInterval(() => { if (!document.hidden) syncNow(); }, 60000);
@@ -1354,6 +1354,13 @@ $('#main').addEventListener('click', e => {
     if (inp) inp.blur();
     S.settings = { ...S.settings, gcalUrl: v }; S.cal = {}; S.calError = ''; saveCal(); saveSettings(false); syncNow();
     ensureCal(todayStr(), true);
+  }
+  else if (act === 'syncCheck') {
+    // Send a real request to doPost in a new tab, so Google's own message (if any) is visible.
+    const f = document.createElement('form');
+    f.method = 'POST'; f.action = S.settings.gcalUrl; f.target = '_blank'; f.enctype = 'text/plain';
+    const i = document.createElement('input'); i.name = 'check'; i.value = '1'; f.appendChild(i);
+    document.body.appendChild(f); f.submit(); f.remove();
   }
   else if (act === 'gcalOff') { S.settings = { ...S.settings, gcalUrl: '' }; S.cal = {}; S.calError = ''; saveCal(); saveSettings(); toast('連携をやめました'); }
   else if (act === 'importYes') {

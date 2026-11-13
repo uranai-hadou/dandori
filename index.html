@@ -877,7 +877,7 @@ function renderSettings() {
           <li>許可を求められたら自分のアカウントを選んで許可します。「このアプリは Google で確認されていません」と出たら、「詳細」→「（プロジェクト名）に移動」で進めます。自分で作ったものなので大丈夫です。</li>
           <li>最後に出る「ウェブアプリのURL」（https://script.google.com/macros/s/…/exec）をコピーして、下に貼り付けて「つなぐ」を押します。</li>
         </ol>
-        <p class="lead"><b>すでにつないでいて、コードを新しくするとき</b>：Apps Script を開いてコードを全部貼り替えて保存 →（まだなら「サービス」に Google Calendar API を追加）→「デプロイ」→「デプロイを管理」→ 鉛筆マーク →「バージョン：新バージョン」→「デプロイ」。URLは変わらないので、貼り直しは要りません。デプロイのときに「Google ドライブ」への許可を求められたら許可してください（スマホ・パソコンの自動同期で、段取り帳のデータをドライブの1ファイルに保存するのに使います）。<br><b>2台目の端末</b>は、URLを貼るのではなく、つないだ端末の「引っ越し用リンク」を一度だけ開いてください。それ以降は自動で同期します。</p>
+        <p class="lead"><b>すでにつないでいて、コードを新しくするとき</b>：Apps Script を開いてコードを全部貼り替えて保存 →（まだなら「サービス」に Google Calendar API を追加）→「デプロイ」→「デプロイを管理」→ 鉛筆マーク →「バージョン：新バージョン」→「デプロイ」。URLは変わらないので、貼り直しは要りません。そのあと、上の「実行する関数」で <b>setup</b> を選んで「▷実行」を押し、Google ドライブとカレンダーへのアクセスを許可してから、もう一度「新バージョン」でデプロイしてください。デプロイのときに許可を求められたら、そこでも許可してください（スマホ・パソコンの自動同期で、段取り帳のデータをドライブの1ファイルに保存するのに使います）。<br><b>2台目の端末</b>は、URLを貼るのではなく、つないだ端末の「引っ越し用リンク」を一度だけ開いてください。それ以降は自動で同期します。</p>
         <textarea class="gcode" id="gcalCode" readonly aria-label="Apps Script のコード">${esc(gasCode(st.gcalToken || ''))}</textarea>
       </div></details>
       ${on && (st.gcalSeen || []).length ? `<div class="frow"><span class="label">段取り帳に出すカレンダー（チェックを外すと出なくなります）</span>${(st.gcalSeen || []).map((n, i) => `<label class="calpick"><input type="checkbox" id="gcal-show-${i}"${(st.gcalHide || []).includes(n) ? '' : ' checked'}><span>${esc(n)}</span></label>`).join('')}</div>` : ''}
@@ -930,8 +930,10 @@ const calOn = () => S.mode === 'local' && !!S.settings.gcalUrl;
 const meetBtn = link => link && /^https:\/\//.test(link) ? `<a class="meet" href="${esc(link)}" target="_blank" rel="noopener">${/meet\.google\.com/.test(link) ? 'Meetに参加' : /zoom\.us/.test(link) ? 'Zoomに参加' : '会議に参加'}</a>` : '';
 const CAL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>';
 function gasCode(token) {
-  return `// 朝の段取り帳 ⇄ Googleカレンダー（読み取り専用） v2
+  return `// 朝の段取り帳 ⇄ Googleカレンダー・端末の同期 v3
+// 初めてのとき：上の「実行する関数」で setup を選んで「実行」→ 許可してください。
 const TOKEN = '${token}';
+function setup() { dataFile(); CalendarApp.getDefaultCalendar(); Logger.log('準備できました。デプロイ→デプロイを管理→鉛筆→新バージョン→デプロイ をしてください'); }
 function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.token !== TOKEN) return out({ error: 'token' });
@@ -979,6 +981,7 @@ function doPost(e) {
   if (body.token !== TOKEN) return out({ error: 'token' });
   const lock = LockService.getScriptLock(); lock.waitLock(20000);
   try { const merged = mergeData(loadData(), body.data || {}); saveData(merged); return out({ ok: true, v: 3, data: merged }); }
+  catch (err) { return out({ error: 'server', msg: String(err && err.message || err) }); }
   finally { lock.releaseLock(); }
 }
 function dataFile() {
@@ -1152,6 +1155,7 @@ async function syncNow() {
     const res = await fetch(S.settings.gcalUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ token: S.settings.gcalToken, data: localState() }) });
     const text = await res.text();
     let j; try { j = JSON.parse(text); } catch (e) { throw new Error(/doPost/.test(text) ? 'old' : 'net'); }
+    if (j && j.error === 'server') { S.syncMsg = j.msg || ''; throw new Error('server'); }
     if (!j || j.error || !j.data) throw new Error(j && j.error === 'token' ? 'token' : 'net');
     // Keep anything changed on this device while the request was in flight.
     const m = mergeState(j.data, localState());
@@ -1162,7 +1166,7 @@ async function syncNow() {
     S.syncAt = Date.now(); S.syncErr = '';
     saveCache();
   } catch (e) {
-    S.syncErr = e.message === 'token' || e.message === 'old' ? e.message : 'net';
+    S.syncErr = ['token', 'old', 'server'].includes(e.message) ? e.message : 'net';
   } finally {
     syncing = false; render();
     if (syncAgain) { syncAgain = false; scheduleSync(500); }
@@ -1172,7 +1176,8 @@ function syncLine() {
   if (!syncOn()) return '';
   if (S.syncErr === 'old') return '端末の間の同期：Apps Script のコードが古いため止まっています（設定の「コードを新しくするとき」を見てください）';
   if (S.syncErr === 'token') return '端末の間の同期：この端末の合言葉が違います。つないだ端末から「引っ越し用リンク」を送ってください';
-  if (S.syncErr) return '端末の間の同期：通信できませんでした（自動で再試行します）';
+  if (S.syncErr === 'server') return '端末の間の同期：Apps Script でエラーが出ています（' + esc(S.syncMsg || '') + '）。Apps Script で setup を実行して許可してください';
+  if (S.syncErr) return '端末の間の同期：つながりませんでした。Apps Script で「setup」を実行して許可したあと、新バージョンでデプロイしてください（設定の「コードを新しくするとき」）';
   return S.syncAt ? `スマホ・パソコンと同期済み（${hm(S.syncAt)}）` : '同期しています…';
 }
 setInterval(() => { if (!document.hidden) syncNow(); }, 60000);

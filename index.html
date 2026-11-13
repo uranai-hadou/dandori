@@ -679,8 +679,8 @@ function exampleNotice() {
   if (![...S.tasks.values()].some(t => t.example) && !(S.settings.routines || []).some(isEx)) return '';
   return `<div class="notice gold"><div>「（例）」は使い方を見るためのサンプルです。試したら消してください。</div><div class="acts"><button class="btn small soft" data-act="clearEx">サンプルをすべて消す</button></div></div>`;
 }
-const APP_VER = '11/13-7';
-const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? (syncOn() ? syncLine() : 'このブラウザの中だけに保存しています（Googleカレンダー連携をすると、スマホ・パソコンで自動同期します）') : '接続しています…'}<br><span style="opacity:.6">版：${APP_VER}・${location.hostname.includes('github.io') ? 'ウェブ版' : 'claude.ai版'}</span></div>`;
+const APP_VER = '11/14-1';
+const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? (syncOn() ? syncLine() : '<b>この端末はまだ同期していません</b>（この端末の中だけに保存中）。<button class="btn small gold" data-act="goJoin" style="margin:6px 0 0">もう1台とつなぐ</button>') : '接続しています…'}<br><span style="opacity:.6">版：${APP_VER}・${location.hostname.includes('github.io') ? 'ウェブ版' : 'claude.ai版'}</span></div>`;
 
 // Morning check-in (today before starting) and evening prep (future days)
 function renderPlan(d) {
@@ -865,6 +865,8 @@ function renderSettings() {
   </div></section>`;
   if (S.mode === 'local') {
     const on = !!st.gcalUrl, t0 = todayStr(), c = S.cal[t0];
+    if (!syncOn()) h += `<section class="panel" id="join-panel"><h3>もう1台とつなぐ</h3><p class="lead">もう1台（パソコンなど）で「設定」→「スマホ（別の端末）をつなぐ」→「つなぐリンクをコピー」を押し、そのリンクをここに貼り付けて「つなぐ」を押してください。ホーム画面のアイコンから開いている場合も、この方法でつなげます。</p>
+      <div class="addline"><input id="join-paste" placeholder="https://uranai-hadou.github.io/dandori/?join=…" aria-label="つなぐリンク"><button class="btn small gold" data-act="joinPaste">つなぐ</button></div></section>`;
     h += `<section class="panel" id="gcal-panel"><h3>Googleカレンダー連携</h3>
       <p class="lead">Googleカレンダーの予定を読み込んで、その時間を避けてやることを並べます。読み取るだけで、カレンダーを書き換えることはありません。</p>
       <div class="gstate ${on ? (S.calError ? 'ng' : 'ok') : ''}">${on ? (S.calError ? (S.calError === 'token' ? 'つながっていません：合言葉が合いません（手順1〜3をやり直してください）' : 'つながっていません：URLか通信を確認してください') : `つながっています${c && c.at ? `（${hm(c.at)}に読み込み・今日の予定 ${c.events.filter(e => !e.allDay).length}件）` : ''}${c && c.at && !c.failed && (c.v || 1) < 2 ? '<br><span class="carry">コードが古いため、Meetのリンクが出ません。下の「コードを新しくするとき」の手順で更新してください。</span>' : c && c.v >= 2 && !c.meet ? '<br><span class="carry">Meetのリンクを出すには、Apps Script の「サービス」に Google Calendar API を追加して、新バージョンでデプロイしてください。</span>' : ''}`) : 'まだつながっていません'}</div>
@@ -1394,6 +1396,15 @@ $('#main').addEventListener('click', e => {
     ensureToken(); S.cal = {}; saveCal();
     S.importData = null; history.replaceState(null, '', location.pathname); saveCache(); render();
     toast('読み込みました。この端末でも同じ中身で使えます');
+  }
+  else if (act === 'goJoin') { const n = document.querySelector('.nav [data-view=settings]'); if (n) n.click(); setTimeout(() => { const el = document.getElementById('join-panel'); if (el) el.scrollIntoView({ block: 'center' }); }, 50); }
+  else if (act === 'joinPaste') {
+    const v = ($('#join-paste').value || '').trim(), m = v.match(/join=([A-Za-z0-9_-]+)/);
+    let o = null; try { o = m && JSON.parse(b64d(m[1])); } catch (e) {}
+    if (!o || !o.url || !o.token) { toast('「…?join=…」の形のリンクを貼り付けてください'); return; }
+    S.importData = { join: true, ...o }; $('#join-paste').value = ''; $('#join-paste').blur();
+    document.querySelector('[data-act=joinYes]') || render();
+    const b = document.querySelector('[data-act=joinYes]'); if (b) b.click();
   }
   else if (act === 'joinYes') {
     const o = S.importData; if (!o || !o.join) return;

@@ -679,7 +679,7 @@ function exampleNotice() {
   if (![...S.tasks.values()].some(t => t.example) && !(S.settings.routines || []).some(isEx)) return '';
   return `<div class="notice gold"><div>「（例）」は使い方を見るためのサンプルです。試したら消してください。</div><div class="acts"><button class="btn small soft" data-act="clearEx">サンプルをすべて消す</button></div></div>`;
 }
-const APP_VER = '11/13-6';
+const APP_VER = '11/13-7';
 const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? (syncOn() ? syncLine() : 'このブラウザの中だけに保存しています（Googleカレンダー連携をすると、スマホ・パソコンで自動同期します）') : '接続しています…'}<br><span style="opacity:.6">版：${APP_VER}・${location.hostname.includes('github.io') ? 'ウェブ版' : 'claude.ai版'}</span></div>`;
 
 // Morning check-in (today before starting) and evening prep (future days)
@@ -1131,7 +1131,17 @@ function waitAdd() {
 // ---------- daily fixed tasks: one copy per day in that day's list ----------
 function ensureDaily(d) {
   if (!S.loaded || !d || d < todayStr()) return;
-  const R = S.settings.dailyRoutines || []; if (!R.length) return;
+  const R = S.settings.dailyRoutines || [];
+  // Copies left behind by a daily task that no longer exists (e.g. replaced on another device) are removed,
+  // but only once this device has the latest settings.
+  let gone = false;
+  if (!syncOn() || S.syncAt) {
+    const ids = new Set(R.map(r => r.id)), t0 = todayStr();
+    [...S.tasks.values()].filter(t => t.fromDaily && !ids.has(t.fromDaily) && !t.done && t.date && t.date >= t0)
+      .forEach(t => { forget(t.id); write('tasks/' + t.id, r => r.delete()); gone = true; });
+  }
+  if (gone) render();
+  if (!R.length) return;
   const made = { ...(dayDoc(d).dailyMade || {}) }; let changed = false;
   R.forEach(r => {
     if (made[r.id]) return;

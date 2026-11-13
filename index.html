@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="段取り帳">
+<meta name="apple-mobile-web-app-title" content="task for 2mil">
 <meta name="theme-color" content="#10121A">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 </head>
 <body>
-<title>朝の段取り帳</title>
+<title>task for 2mil</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
@@ -878,10 +878,10 @@ function renderSettings() {
           <li>許可を求められたら自分のアカウントを選んで許可します。「このアプリは Google で確認されていません」と出たら、「詳細」→「（プロジェクト名）に移動」で進めます。自分で作ったものなので大丈夫です。</li>
           <li>最後に出る「ウェブアプリのURL」（https://script.google.com/macros/s/…/exec）をコピーして、下に貼り付けて「つなぐ」を押します。</li>
         </ol>
-        <p class="lead"><b>すでにつないでいて、コードを新しくするとき</b>：Apps Script を開いてコードを全部貼り替えて保存 →（まだなら「サービス」に Google Calendar API を追加）→「デプロイ」→「デプロイを管理」→ 鉛筆マーク →「バージョン：新バージョン」→「デプロイ」。URLは変わらないので、貼り直しは要りません。そのあと、上の「実行する関数」で <b>setup</b> を選んで「▷実行」を押し、Google ドライブとカレンダーへのアクセスを許可してから、もう一度「新バージョン」でデプロイしてください。デプロイのときに許可を求められたら、そこでも許可してください（スマホ・パソコンの自動同期で、段取り帳のデータをドライブの1ファイルに保存するのに使います）。<br><b>2台目の端末</b>は、URLを貼るのではなく、つないだ端末の「引っ越し用リンク」を一度だけ開いてください。それ以降は自動で同期します。</p>
+        <p class="lead"><b>すでにつないでいて、コードを新しくするとき</b>：Apps Script を開いてコードを全部貼り替えて保存 →（まだなら「サービス」に Google Calendar API を追加）→「デプロイ」→「デプロイを管理」→ 鉛筆マーク →「バージョン：新バージョン」→「デプロイ」。URLは変わらないので、貼り直しは要りません。そのあと、上の「実行する関数」で <b>setup</b> を選んで「▷実行」を押し、Google ドライブとカレンダーへのアクセスを許可してから、もう一度「新バージョン」でデプロイしてください。デプロイのときに許可を求められたら、そこでも許可してください（スマホ・パソコンの自動同期で、task for 2mil のデータをドライブの1ファイルに保存するのに使います）。<br><b>2台目の端末</b>は、URLを貼るのではなく、つないだ端末の「引っ越し用リンク」を一度だけ開いてください。それ以降は自動で同期します。</p>
         <textarea class="gcode" id="gcalCode" readonly aria-label="Apps Script のコード">${esc(gasCode(st.gcalToken || ''))}</textarea>
       </div></details>
-      ${on && (st.gcalSeen || []).length ? `<div class="frow"><span class="label">段取り帳に出すカレンダー（チェックを外すと出なくなります）</span>${(st.gcalSeen || []).map((n, i) => `<label class="calpick"><input type="checkbox" id="gcal-show-${i}"${(st.gcalHide || []).includes(n) ? '' : ' checked'}><span>${esc(n)}</span></label>`).join('')}</div>` : ''}
+      ${on && (st.gcalSeen || []).length ? `<div class="frow"><span class="label">task for 2mil に出すカレンダー（チェックを外すと出なくなります）</span>${(st.gcalSeen || []).map((n, i) => `<label class="calpick"><input type="checkbox" id="gcal-show-${i}"${(st.gcalHide || []).includes(n) ? '' : ' checked'}><span>${esc(n)}</span></label>`).join('')}</div>` : ''}
       <div class="addline"><input id="gcal-url" value="${esc(st.gcalUrl || '')}" placeholder="https://script.google.com/macros/s/…/exec" aria-label="ウェブアプリのURL"><button class="btn small gold" data-act="gcalConnect">${on ? '更新' : 'つなぐ'}</button></div>
       ${on ? '<div><button class="textbtn" data-act="gcalOff">連携をやめる</button></div>' : ''}
     </section>`;

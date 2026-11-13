@@ -678,7 +678,7 @@ function exampleNotice() {
   if (![...S.tasks.values()].some(t => t.example) && !(S.settings.routines || []).some(isEx)) return '';
   return `<div class="notice gold"><div>「（例）」は使い方を見るためのサンプルです。試したら消してください。</div><div class="acts"><button class="btn small soft" data-act="clearEx">サンプルをすべて消す</button></div></div>`;
 }
-const APP_VER = '11/13-3';
+const APP_VER = '11/13-4';
 const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? (syncOn() ? syncLine() : 'このブラウザの中だけに保存しています（Googleカレンダー連携をすると、スマホ・パソコンで自動同期します）') : '接続しています…'}<br><span style="opacity:.6">版：${APP_VER}・${location.hostname.includes('github.io') ? 'ウェブ版' : 'claude.ai版'}</span></div>`;
 
 // Morning check-in (today before starting) and evening prep (future days)
@@ -1359,7 +1359,8 @@ $('#main').addEventListener('click', e => {
     // Send a real request to doPost in a new tab, so Google's own message (if any) is visible.
     const f = document.createElement('form');
     f.method = 'POST'; f.action = S.settings.gcalUrl; f.target = '_blank'; f.enctype = 'text/plain';
-    const i = document.createElement('input'); i.name = 'check'; i.value = '1'; f.appendChild(i);
+    // text/plain form sends "name=value"; split the JSON so the body is a real sync request with no changes.
+    const i = document.createElement('input'); i.name = JSON.stringify({ token: S.settings.gcalToken, data: {}, pad: '' }).slice(0, -2); i.value = '"}'; f.appendChild(i);
     document.body.appendChild(f); f.submit(); f.remove();
   }
   else if (act === 'gcalOff') { S.settings = { ...S.settings, gcalUrl: '' }; S.cal = {}; S.calError = ''; saveCal(); saveSettings(); toast('連携をやめました'); }

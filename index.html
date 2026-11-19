@@ -251,6 +251,11 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
 .meet { display: inline-flex; align-items: center; gap: 4px; background: var(--indigo); color: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; justify-self: start; }
 .meet::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .8; }
 .meet:hover { filter: brightness(1.1); }
+.bodywrap { min-width: 0; display: grid; gap: 8px; justify-items: start; }
+.bodywrap .body { width: 100%; }
+.meet.open::before { display: none; }
+.meet.open::after { content: "↗"; }
+.rlist .meet.open { padding: 3px 10px; font-size: 12px; margin-left: 4px; vertical-align: 1px; }
 .calrow .meet { grid-column: 2; }
 .cal-ico { width: 24px; height: 24px; display: grid; place-items: center; color: var(--indigo); }
 .cal-ico svg { width: 19px; height: 19px; }
@@ -489,6 +494,13 @@ const nowMin = () => { const d = new Date(), m = d.getHours() * 60 + d.getMinute
 const hm = ts => ts ? fmt(new Date(ts).getHours() * 60 + new Date(ts).getMinutes()) : '';
 const durTxt = m => m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}` : `${m}分`;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// A link pasted into a task's name (or memo) becomes an "開く" button; the name is shown without it.
+const URL_RE = /https?:\/\/[^\s\u3000]+/;
+// Tasks whose name has one of these words open that page even without a pasted link.
+const AUTO_LINKS = [[/写経/, 'https://claude.ai/artifact/E2c7TESoPsnk2g2KiCenZF']];
+const urlOf = s => { const v = String(s || ''), m = v.match(URL_RE); if (m) return m[0]; const a = AUTO_LINKS.find(([re]) => re.test(v)); return a ? a[1] : ''; };
+const plain = s => { const v = String(s ?? ''), w = v.replace(URL_RE, '').replace(/\s{2,}/g, ' ').trim(); return w || v; };
+const openBtn = (...ss) => { const u = ss.map(urlOf).find(Boolean); return u ? `<a class="meet open" href="${esc(u)}" target="_blank" rel="noopener">開く</a>` : ''; };
 const uid = () => 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const dateLabel = s => { const d = parseYmd(s); return `${d.getMonth() + 1}月${d.getDate()}日（${WD[d.getDay()]}）`; };
 const relLabel = s => { const t = todayStr(); return s === t ? '今日' : s === addDays(t, 1) ? '明日' : s === addDays(t, -1) ? '昨日' : ''; };
@@ -690,16 +702,16 @@ function renderPlan(d) {
 
   const phase = isT && dayDoc(d).phase === 'order' ? 'order' : 'dump';
   const rdur = sum(R, r => r.dur || 10);
-  const fixedHTML = fixed.length ? `<div class="subhead">時間が決まっている予定（その時刻に入ります。タップで変更）</div>` + fixed.map(t => `<button class="fixedrow" data-act="edit" data-id="${t.id}"><span class="mono">${t.time}–${fmt(timeMin(t.time) + (t.dur || 30))}</span><span>${esc(t.title)}</span></button>`).join('') : '';
+  const fixedHTML = fixed.length ? `<div class="subhead">時間が決まっている予定（その時刻に入ります。タップで変更）</div>` + fixed.map(t => `<button class="fixedrow" data-act="edit" data-id="${t.id}"><span class="mono">${t.time}–${fmt(timeMin(t.time) + (t.dur || 30))}</span><span>${esc(plain(t.title))}</span></button>`).join('') : '';
 
   // 1. fixed morning tasks (compact)
   h += `<div class="step"><span class="n">1</span><div><h2>朝の固定タスク</h2><p>${R.length ? `毎朝いちばん最初に ${R.length}つ・約<b>${durTxt(rdur)}</b>` : '毎朝やることを登録しておくと、一日の最初に時間を取ります。'}</p></div></div>`;
   h += R.length
-    ? `<details class="fold"><summary>中身を見る</summary><div class="inner"><ul class="mini">${R.map(r => `<li><span>${esc(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`).join('')}</ul><div class="foot"><button class="textbtn" data-act="rtEdit">編集する</button></div></div></details>`
+    ? `<details class="fold"><summary>中身を見る</summary><div class="inner"><ul class="mini">${R.map(r => `<li><span>${esc(plain(r.title))}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`).join('')}</ul><div class="foot"><button class="textbtn" data-act="rtEdit">編集する</button></div></div></details>`
     : `<div class="card"><button class="btn soft small" data-act="rtEdit">朝の固定タスクを登録する</button></div>`;
   const NR = S.settings.nightRoutines || [];
   h += NR.length
-    ? `<details class="fold"><summary>夜の固定タスク（${esc(S.settings.nightStart || '22:00')}から ${NR.length}つ・約${durTxt(sum(NR, r => r.dur || 10))}）</summary><div class="inner"><ul class="mini">${NR.map(r => `<li><span>${esc(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`).join('')}</ul><div class="foot"><button class="textbtn" data-act="rtEdit" data-k="pm">編集する</button></div></div></details>`
+    ? `<details class="fold"><summary>夜の固定タスク（${esc(S.settings.nightStart || '22:00')}から ${NR.length}つ・約${durTxt(sum(NR, r => r.dur || 10))}）</summary><div class="inner"><ul class="mini">${NR.map(r => `<li><span>${esc(plain(r.title))}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`).join('')}</ul><div class="foot"><button class="textbtn" data-act="rtEdit" data-k="pm">編集する</button></div></div></details>`
     : `<div class="linkrow"><span>夜に毎日やることも登録できます</span><button class="textbtn" data-act="rtEdit" data-k="pm">夜の固定タスクを登録する</button></div>`;
 
   if (phase === 'dump') {
@@ -708,7 +720,7 @@ function renderPlan(d) {
       ? '思いつくまま、どんどん書いてください。順番はこのあと決めます。別の日にやることは、右下の＋から日付を選んで入れられます。'
       : '思いついたら書いておきましょう。順番は当日の朝に決めます。'}</p></div></div>`;
     const all = [...list, ...fixed];
-    if (all.length) h += `<ul class="dumplist">${all.map(t => `<li class="${S.fresh === t.id ? 'fresh' : ''}"><button data-act="edit" data-id="${t.id}"><span class="dot"></span><span class="title">${esc(t.title)}</span><span class="sub">${t.fromDaily ? '<span class="chip rt">毎日</span> ' : ''}${t.time ? `<span class="chip appt">${t.time}〜</span>` : ''}${t.date < d ? '<span class="carry">昨日から</span>' : ''}</span></button>${durSel(t)}${d > todayStr() ? `<button class="later" data-act="pullToday" data-id="${t.id}">今日やる</button>` : ''}</li>`).join('')}</ul><p class="note" style="text-align:left">右の時間は、かかりそうな時間の目安です。タップで変えられます。</p>`;
+    if (all.length) h += `<ul class="dumplist">${all.map(t => `<li class="${S.fresh === t.id ? 'fresh' : ''}"><button data-act="edit" data-id="${t.id}"><span class="dot"></span><span class="title">${esc(plain(t.title))}</span><span class="sub">${t.fromDaily ? '<span class="chip rt">毎日</span> ' : ''}${t.time ? `<span class="chip appt">${t.time}〜</span>` : ''}${t.date < d ? '<span class="carry">昨日から</span>' : ''}</span></button>${durSel(t)}${d > todayStr() ? `<button class="later" data-act="pullToday" data-id="${t.id}">今日やる</button>` : ''}</li>`).join('')}</ul><p class="note" style="text-align:left">右の時間は、かかりそうな時間の目安です。タップで変えられます。</p>`;
     h += `<div class="dumpbox">
       <textarea id="dump-input" rows="4" placeholder="1行に1つずつ書いてください&#10;例）講座の構成を考える 90分&#10;　　確定申告の書類を集める&#10;　　新しい鑑定メニューの案出し" aria-label="やることを書き出す">${esc(S.draft[d] || '')}</textarea>
       <div class="row"><span>「60分」と書くと時間も入ります（なければ30分）</span><button class="btn small gold" data-act="dumpAdd">リストに入れる</button></div>
@@ -721,7 +733,7 @@ function renderPlan(d) {
     // 3. prioritise by dragging rows into place
     h += `<div class="step done"><span class="n">✓</span><div><h2>書き出し ${list.length + fixed.length}件</h2></div></div>`;
     h += `<div class="step"><span class="n">3</span><div><h2>優先順位をつける</h2><p>右の <b>⠿</b> を掴んで、大事なものを上へ動かしてください。上にあるものから先にやります。</p></div></div>`;
-    h += `<ol class="sortlist" id="sortPlan">${list.map((t, i) => `<li data-id="${t.id}"${S.fresh === t.id ? ' class="fresh"' : ''}><span class="pos">${i + 1}</span><button class="info" data-act="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span>${t.date < d ? '<span class="sub"><span class="carry">昨日から</span></span>' : ''}</button>${durSel(t)}${GRIP}</li>`).join('')}</ol>`;
+    h += `<ol class="sortlist" id="sortPlan">${list.map((t, i) => `<li data-id="${t.id}"${S.fresh === t.id ? ' class="fresh"' : ''}><span class="pos">${i + 1}</span><button class="info" data-act="edit" data-id="${t.id}"><span class="title">${esc(plain(t.title))}</span>${t.date < d ? '<span class="sub"><span class="carry">昨日から</span></span>' : ''}</button>${durSel(t)}${GRIP}</li>`).join('')}</ol>`;
     h += `<div class="linkrow"><button class="textbtn" data-act="toDump">← 書き足す</button><span>タスクをタップすると、明日へ回したり消したりできます</span></div>`;
     h += laterHTML();
     h += fixedHTML;
@@ -745,7 +757,7 @@ function itemHTML(it, now, cur) {
   return `<li class="item${t.time ? ' appt' : ' flex'}${past ? ' past' : ''}${cur ? ' cur' : ''}${S.fresh === t.id ? ' fresh' : ''}" data-id="${t.id}">
     <div class="time mono">${fmt(it.start)}<small>${fmt(it.end)}</small></div>
     <button class="check" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を終わったことにする"></button>
-    <button class="body" data-act="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span><span class="meta">${cur ? `<span class="chip cur">${cur}</span>` : ''}${past ? '<span class="chip late">時間が過ぎています</span>' : ''}${t.time ? '<span class="chip appt">予定</span>' : ''}<span class="chip">${durTxt(t.dur || 30)}</span>${t.fromDaily ? '<span class="chip rt">毎日</span>' : ''}${t.note ? '<span class="chip memo">メモあり</span>' : ''}</span></button>${t.time ? '' : GRIP}
+    <div class="bodywrap"><button class="body" data-act="edit" data-id="${t.id}"><span class="title">${esc(plain(t.title))}</span><span class="meta">${cur ? `<span class="chip cur">${cur}</span>` : ''}${past ? '<span class="chip late">時間が過ぎています</span>' : ''}${t.time ? '<span class="chip appt">予定</span>' : ''}<span class="chip">${durTxt(t.dur || 30)}</span>${t.fromDaily ? '<span class="chip rt">毎日</span>' : ''}${t.note ? '<span class="chip memo">メモあり</span>' : ''}</span></button>${openBtn(t.title, t.note)}</div>${t.time ? '' : GRIP}
   </li>`;
 }
 function routineCardHTML(P, k = 'am') {
@@ -755,7 +767,7 @@ function routineCardHTML(P, k = 'am') {
   const when = k === 'pm' ? `${esc(S.settings.nightStart || '22:00')}から・` : '';
   return `<details class="routine" id="${RK[k].box}"${all ? '' : ' open'}>
     <summary><span class="rt-h">${RK[k].label}</span><span class="rt-s mono${all ? ' ok' : ''}">${all ? 'すべて完了' : `${when}${doneN}/${R.length}・残り${durTxt(sum(open, r => r.dur || 10))}`}</span></summary>
-    <ul class="rlist">${R.map(r => { const on = !!dn[r.id]; return `<li class="${on ? 'done' : ''}"><button class="check${on ? ' on' : ''}" data-act="rtToggle" data-k="${k}" data-rid="${esc(r.id)}" aria-label="「${esc(r.title)}」を${on ? '未完了に戻す' : '完了にする'}"></button><span class="title">${esc(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`; }).join('')}</ul>
+    <ul class="rlist">${R.map(r => { const on = !!dn[r.id]; return `<li class="${on ? 'done' : ''}"><button class="check${on ? ' on' : ''}" data-act="rtToggle" data-k="${k}" data-rid="${esc(r.id)}" aria-label="「${esc(r.title)}」を${on ? '未完了に戻す' : '完了にする'}"></button><span class="title">${esc(plain(r.title))} ${openBtn(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`; }).join('')}</ul>
   </details>`;
 }
 // The day after "start": one timed list
@@ -797,7 +809,7 @@ function renderFlow(d) {
     const rtLog = (R, dn, label) => `<li><span class="mono muted">${hm(Math.max(...R.map(r => dn[r.id] || 0)))}</span><span class="rt-ico" aria-hidden="true">${LOOP_SVG}</span><span>${label}（${R.length}つ）</span></li>`;
     const rLog = (rAll ? rtLog(P.routines, P.rDone, '朝の固定タスク') : '') + (nAll ? rtLog(P.nights, P.nDone, '夜の固定タスク') : '');
     h += `<details class="fold"${P.isToday ? '' : ' open'}><summary>終わったこと（${P.done.length + P.calDone.length + (rAll ? 1 : 0) + (nAll ? 1 : 0)}）</summary><div class="inner"><ul class="donelog">${rLog}${[
-      ...P.done.map(t => ({ at: t.doneAt || 0, html: `<li><span class="mono muted">${hm(t.doneAt)}</span><button class="check on" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を未完了に戻す"></button><span>${esc(t.title)}</span></li>` })),
+      ...P.done.map(t => ({ at: t.doneAt || 0, html: `<li><span class="mono muted">${hm(t.doneAt)}</span><button class="check on" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を未完了に戻す"></button><span>${esc(plain(t.title))}</span></li>` })),
       ...P.calDone.map(c => ({ at: c.doneAt, html: `<li><span class="mono muted">${hm(c.doneAt)}</span><button class="check on" data-act="calToggle" data-cid="${esc(c.ev.id)}" aria-label="「${esc(c.ev.title)}」を未完了に戻す"></button><span>${esc(c.ev.title)}</span></li>` })),
     ].sort((a, b) => a.at - b.at).map(x => x.html).join('')}</ul></div></details>`;
   }
@@ -829,7 +841,7 @@ function renderUpcoming() {
     if (!sepDone && d >= week) { h += `<div class="up-sep">1週間より先</div>`; sepDone = true; }
     const items = list.filter(t => t.date === d).sort((a, b) => (a.time ? timeMin(a.time) : 1e5) - (b.time ? timeMin(b.time) : 1e5) || byOrder(a, b));
     h += `<section class="up-day"><div class="up-h"><b>${dateLabel(d)}</b><span class="rel">${relDays(d)}</span><button class="textbtn" data-act="openDay" data-date="${d}">この日を開く</button></div><ul class="uplist">${items.map(t => `<li${S.fresh === t.id ? ' class="fresh"' : ''}>
-      <button class="upmain" data-act="edit" data-id="${t.id}"><span class="uptime${t.time ? ' set' : ''}">${t.time ? `${t.time}〜` : '時間未定'}</span><span class="t"><span class="title">${esc(t.title)}</span>${t.note ? `<span class="upnote">${esc(t.note)}</span>` : ''}<span class="upmeta">${durTxt(t.dur || 30)}</span></span></button>
+      <button class="upmain" data-act="edit" data-id="${t.id}"><span class="uptime${t.time ? ' set' : ''}">${t.time ? `${t.time}〜` : '時間未定'}</span><span class="t"><span class="title">${esc(plain(t.title))}</span>${t.note ? `<span class="upnote">${esc(t.note)}</span>` : ''}<span class="upmeta">${durTxt(t.dur || 30)}</span></span></button>
       <span class="ctl"><button class="later" data-act="pullToday" data-id="${t.id}">今日やる</button><button class="later" data-act="toWait" data-id="${t.id}">待ちへ</button></span>
     </li>`).join('')}</ul></section>`;
   }
@@ -1109,7 +1121,7 @@ function waitPanelHTML() {
     <button class="whead" data-act="waitFold"><span><b>タイミング待ち</b><span class="cnt">${list.length}件</span></span></button>
     <div class="wbody">
       <p class="wlead">相手の都合や連絡しだいで動くこと。優先順位はつけず、ここに置いておきます。⠿ を掴んで、今日のやることとの間で行き来できます。</p>
-      <ul class="wlist" id="waitList">${list.map(t => `<li data-id="${t.id}"${S.fresh === t.id ? ' class="fresh"' : ''}><button class="check" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を終わったことにする"></button><button class="wt" data-act="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span>${t.note ? `<span class="upnote">${esc(t.note)}</span>` : ''}</button><button class="later" data-act="waitNow" data-id="${t.id}">今やる</button>${GRIP}</li>`).join('')}</ul>
+      <ul class="wlist" id="waitList">${list.map(t => `<li data-id="${t.id}"${S.fresh === t.id ? ' class="fresh"' : ''}><button class="check" data-act="toggle" data-id="${t.id}" aria-label="「${esc(t.title)}」を終わったことにする"></button><button class="wt" data-act="edit" data-id="${t.id}"><span class="title">${esc(plain(t.title))}</span>${t.note ? `<span class="upnote">${esc(t.note)}</span>` : ''}</button><button class="later" data-act="waitNow" data-id="${t.id}">今やる</button>${GRIP}</li>`).join('')}</ul>
       <div class="wadd"><input id="wait-add" value="${esc(S.draft.wait || '')}" placeholder="例：伊藤さんに電話（夕方なら出られる）" aria-label="タイミング待ちを追加"><button class="btn small gold" data-act="waitAdd">追加</button></div>
     </div>
   </aside>`;

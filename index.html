@@ -497,7 +497,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 // A link pasted into a task's name (or memo) becomes an "開く" button; the name is shown without it.
 const URL_RE = /https?:\/\/[^\s\u3000]+/;
 // Tasks whose name has one of these words open that page even without a pasted link.
-const AUTO_LINKS = [[/写経/, 'https://claude.ai/artifact/E2c7TESoPsnk2g2KiCenZF']];
+const AUTO_LINKS = [[/写経|社協|社教|社経|写教|しゃきょう/, 'https://claude.ai/artifact/E2c7TESoPsnk2g2KiCenZF']];
 const urlOf = s => { const v = String(s || ''), m = v.match(URL_RE); if (m) return m[0]; const a = AUTO_LINKS.find(([re]) => re.test(v)); return a ? a[1] : ''; };
 const plain = s => { const v = String(s ?? ''), w = v.replace(URL_RE, '').replace(/\s{2,}/g, ' ').trim(); return w || v; };
 const openBtn = (...ss) => { const u = ss.map(urlOf).find(Boolean); return u ? `<a class="meet open" href="${esc(u)}" target="_blank" rel="noopener">開く</a>` : ''; };

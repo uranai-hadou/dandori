@@ -205,10 +205,12 @@ details.routine summary::-webkit-details-marker { display: none; }
 .rt-s { font-size: 12.5px; color: var(--muted); }
 .rt-s.ok { color: var(--ok); font-weight: 700; }
 .rlist { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
-.rlist li { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14.5px; }
+.rlist li { display: grid; grid-template-columns: 28px minmax(0,1fr) auto auto; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14.5px; }
 .rlist li:first-child { border-top: 0; }
 .rlist li.done .title { text-decoration: line-through; color: var(--muted); }
 .rlist .mono { font-size: 12px; color: var(--muted); }
+.rlist .grip, .rt-edit .grip { width: 32px; height: 32px; }
+.rt-edit .textbtn { justify-self: start; }
 
 details.fold { background: var(--surface); border-radius: 14px; padding: 12px 14px; }
 details.fold summary { cursor: pointer; font-weight: 500; font-size: 14px; list-style: none; display: flex; justify-content: space-between; gap: 8px; }
@@ -231,8 +233,8 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
 .panel h3 { font-family: var(--f-display); font-size: 18px; }
 .panel .lead { margin: 0; font-size: 13px; color: var(--muted); }
 .rt-edit { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.rt-edit li { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto auto; gap: 6px; align-items: center; }
-.rt-edit.withtime li { grid-template-columns: minmax(0,1fr) auto auto auto auto auto; }
+.rt-edit li { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; gap: 6px; align-items: center; }
+.rt-edit.withtime li { grid-template-columns: minmax(0,1fr) auto auto auto auto; }
 .rt-edit input, .rt-edit select, .addline select, .addline input, .field input { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; min-width: 0; color: var(--ink); }
 .addline { display: flex; gap: 8px; }
 .addline input { flex: 1; }
@@ -367,9 +369,9 @@ details.fold .inner { margin-top: 10px; display: grid; gap: 10px; }
   .prow { grid-template-columns: 30px minmax(0,1fr); }
   .prow .ctl { grid-column: 2; }
   .fixedrow, .calrow { grid-template-columns: 1fr; gap: 0; }
-  .rt-edit li { grid-template-columns: auto auto auto 1fr; }
+  .rt-edit li { grid-template-columns: auto 1fr auto; }
   .rt-edit li input { grid-column: 1 / -1; }
-  .rt-edit.withtime li { grid-template-columns: auto auto auto 1fr; }
+  .rt-edit.withtime li { grid-template-columns: auto auto 1fr auto; }
   .rt-edit li input[type=time] { grid-column: auto; }
   .item.flex { grid-template-columns: 46px 26px minmax(0,1fr) 40px; }
   .sortlist li { grid-template-columns: 18px minmax(0,1fr) 40px; }
@@ -691,7 +693,7 @@ function exampleNotice() {
   if (![...S.tasks.values()].some(t => t.example) && !(S.settings.routines || []).some(isEx)) return '';
   return `<div class="notice gold"><div>「（例）」は使い方を見るためのサンプルです。試したら消してください。</div><div class="acts"><button class="btn small soft" data-act="clearEx">サンプルをすべて消す</button></div></div>`;
 }
-const APP_VER = '11/14-1';
+const APP_VER = '11/21-1';
 const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? (syncOn() ? syncLine() : '<b>この端末はまだ同期していません</b>（この端末の中だけに保存中）。<button class="btn small gold" data-act="goJoin" style="margin:6px 0 0">もう1台とつなぐ</button>') : '接続しています…'}<br><span style="opacity:.6">版：${APP_VER}・${location.hostname.includes('github.io') ? 'ウェブ版' : 'claude.ai版'}</span></div>`;
 
 // Morning check-in (today before starting) and evening prep (future days)
@@ -767,7 +769,7 @@ function routineCardHTML(P, k = 'am') {
   const when = k === 'pm' ? `${esc(S.settings.nightStart || '22:00')}から・` : '';
   return `<details class="routine" id="${RK[k].box}"${all ? '' : ' open'}>
     <summary><span class="rt-h">${RK[k].label}</span><span class="rt-s mono${all ? ' ok' : ''}">${all ? 'すべて完了' : `${when}${doneN}/${R.length}・残り${durTxt(sum(open, r => r.dur || 10))}`}</span></summary>
-    <ul class="rlist">${R.map(r => { const on = !!dn[r.id]; return `<li class="${on ? 'done' : ''}"><button class="check${on ? ' on' : ''}" data-act="rtToggle" data-k="${k}" data-rid="${esc(r.id)}" aria-label="「${esc(r.title)}」を${on ? '未完了に戻す' : '完了にする'}"></button><span class="title">${esc(plain(r.title))} ${openBtn(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span></li>`; }).join('')}</ul>
+    <ul class="rlist" id="rtsort-card-${k}" data-k="${k}">${R.map(r => { const on = !!dn[r.id]; return `<li class="${on ? 'done' : ''}" data-rid="${esc(r.id)}"><button class="check${on ? ' on' : ''}" data-act="rtToggle" data-k="${k}" data-rid="${esc(r.id)}" aria-label="「${esc(r.title)}」を${on ? '未完了に戻す' : '完了にする'}"></button><span class="title">${esc(plain(r.title))} ${openBtn(r.title)}</span><span class="mono">${durTxt(r.dur || 10)}</span>${R.length > 1 ? GRIP : '<span></span>'}</li>`; }).join('')}</ul>
   </details>`;
 }
 // The day after "start": one timed list
@@ -855,13 +857,13 @@ function renderSettings() {
   const editor = (k, lead, extra, ph) => {
     const L = routinesOf(k), pre = RK[k].pre;
     return `<section class="panel" id="${RK[k].panel}"><h3>${RK[k].label}</h3><p class="lead">${lead}合計 ${durTxt(sum(L, r => r.dur || 10) || 0)}</p>${extra}
-    <ul class="rt-edit${k === 'day' ? ' withtime' : ''}">${L.map((r, i) => `<li>
+    ${L.length > 1 && k !== 'day' ? '<p class="note" style="text-align:left;margin:0 0 8px">⠿ を掴むと順番を入れ替えられます。毎日この順番で出ます。</p>' : ''}
+    <ul class="rt-edit${k === 'day' ? ' withtime' : ''}" id="rtsort-${k}" data-k="${k}">${L.map((r, i) => `<li data-rid="${esc(r.id)}">
       <input id="${pre}-title-${esc(r.id)}" value="${esc(r.title)}" aria-label="固定タスク名">
       ${k === 'day' ? `<input type="time" id="${pre}-time-${esc(r.id)}" value="${esc(r.time || '')}" aria-label="開始時刻（なくてもOK）" title="開始時刻（空なら順番どおりに入ります）">` : ''}
       <select id="${pre}-dur-${esc(r.id)}" aria-label="かかる時間">${durOpts(r.dur || 10)}</select>
-      <button class="iconbtn sm" data-act="rtMove" data-k="${k}" data-dir="-1" data-rid="${esc(r.id)}" aria-label="上へ"${i === 0 ? ' disabled' : ''}>↑</button>
-      <button class="iconbtn sm" data-act="rtMove" data-k="${k}" data-dir="1" data-rid="${esc(r.id)}" aria-label="下へ"${i === L.length - 1 ? ' disabled' : ''}>↓</button>
       <button class="textbtn" data-act="rtDel" data-k="${k}" data-rid="${esc(r.id)}">削除</button>
+      ${GRIP}
     </li>`).join('')}</ul>
     <div class="addline"><input id="${pre}-new" placeholder="${ph}" aria-label="${RK[k].label}を追加">${k === 'day' ? `<input type="time" id="${pre}-new-time" aria-label="開始時刻（なくてもOK）" title="開始時刻（空なら順番どおりに入ります）">` : ''}<select id="${pre}-new-dur" aria-label="かかる時間">${durOpts(k === 'day' ? 30 : 10)}</select><button class="btn small gold" data-act="rtAdd" data-k="${k}">追加</button></div>
   </section>`;
@@ -1266,6 +1268,18 @@ function wireDrag() {
   const flow = document.getElementById('sortFlow'); if (flow) Sortable.create(flow, { ...opts, draggable: '.item.flex' });
   const wl = document.getElementById('waitList');
   if (wl && S.view === 'today' && (plan || flow)) Sortable.create(wl, { ...opts, sort: false });
+  // Fixed tasks (morning / night / daily): dragging saves the order itself, so it stays the same every day.
+  document.querySelectorAll('[id^="rtsort-"]').forEach(el => Sortable.create(el, {
+    ...opts, group: 'rt-' + el.id, draggable: 'li',
+    onEnd: e => {
+      S.dragging = false; document.body.classList.remove('drag-on'); S.pendingRender = false;
+      if (e.oldIndex === e.newIndex) { render(); return; }
+      const k = el.dataset.k, by = new Map(routinesOf(k).map(r => [r.id, r]));
+      const ids = [...el.querySelectorAll('li[data-rid]')].map(x => x.dataset.rid);
+      const l = [...ids.map(id => by.get(id)).filter(Boolean), ...routinesOf(k).filter(r => !ids.includes(r.id))];
+      S.settings = { ...S.settings, [RK[k].key]: l }; saveSettings(); toast('順番を固定しました');
+    },
+  }));
 }
 
 // ---------- actions ----------

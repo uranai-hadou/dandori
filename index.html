@@ -616,10 +616,12 @@ async function init() {
 // ---------- ordering & planning ----------
 const legacyRank = t => (t.frog ? 0 : 1) * 10 + (t.imp && t.urg ? 1 : t.imp ? 2 : t.urg ? 3 : 4);
 const byOrder = (a, b) => ((a.order ?? 1e9) - (b.order ?? 1e9)) || (legacyRank(a) - legacyRank(b)) || ((a.createdAt || 0) - (b.createdAt || 0));
-// Things to put in order for day d. On today, unfinished items from earlier days come along.
+// Things to put in order for day d. On today, unfinished items from earlier days come along
+// (except daily fixed tasks: a new copy is made every day, so yesterday's leftover is dropped).
+const carries = (t, d, t0) => t.date === d || (d === t0 && t.date < t0 && !t.fromDaily);
 function planList(d) {
   const t0 = todayStr();
-  return [...S.tasks.values()].filter(t => !t.done && !t.time && t.date && (t.date === d || (d === t0 && t.date < t0))).sort(byOrder);
+  return [...S.tasks.values()].filter(t => !t.done && !t.time && t.date && carries(t, d, t0)).sort(byOrder);
 }
 const fixedList = d => [...S.tasks.values()].filter(t => !t.done && t.time && t.date === d).sort((a, b) => timeMin(a.time) - timeMin(b.time));
 const nextOrder = d => 1 + Math.max(-1, ...[...S.tasks.values()].filter(t => t.date === d && t.order != null).map(t => t.order));
@@ -693,7 +695,7 @@ function exampleNotice() {
   if (![...S.tasks.values()].some(t => t.example) && !(S.settings.routines || []).some(isEx)) return '';
   return `<div class="notice gold"><div>「（例）」は使い方を見るためのサンプルです。試したら消してください。</div><div class="acts"><button class="btn small soft" data-act="clearEx">サンプルをすべて消す</button></div></div>`;
 }
-const APP_VER = '11/21-1';
+const APP_VER = '11/22-1';
 const modeLine = () => `<div class="modeline">${S.mode === 'cloud' ? 'クラウドに保存中（スマホでもパソコンでも同じ内容）' : S.mode === 'local' ? (syncOn() ? syncLine() : '<b>この端末はまだ同期していません</b>（この端末の中だけに保存中）。<button class="btn small gold" data-act="goJoin" style="margin:6px 0 0">もう1台とつなぐ</button>') : '接続しています…'}<br><span style="opacity:.6">版：${APP_VER}・${location.hostname.includes('github.io') ? 'ウェブ版' : 'claude.ai版'}</span></div>`;
 
 // Morning check-in (today before starting) and evening prep (future days)
@@ -1240,7 +1242,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) sync
 // Save the new order of untimed tasks from the order of rows on screen; timed appointments keep their times.
 function applyDomOrder(el) {
   const d = S.viewDate, ids = [...el.querySelectorAll('[data-id]')].filter(x => x.matches('li')).map(x => x.dataset.id);
-  const all = [...S.tasks.values()].filter(t => !t.done && !t.time && t.date && (t.date === d || (d === todayStr() && t.date < d))).sort(byOrder);
+  const all = [...S.tasks.values()].filter(t => !t.done && !t.time && t.date && carries(t, d, todayStr())).sort(byOrder);
   const moved = ids.map(id => S.tasks.get(id)).filter(t => t && !t.time);
   const final = [...moved, ...all.filter(t => !ids.includes(t.id))];
   final.forEach((t, k) => { if (t.order !== k) putTask({ ...t, order: k }, true); });
@@ -1377,8 +1379,9 @@ $('#main').addEventListener('click', e => {
   else if (act === 'replan') { setDay(t0, { started: false, phase: 'order' }); window.scrollTo(0, 0); }
   else if (act === 'overflowTmr') {
     const P = planDay(S.viewDate), nd = addDays(S.viewDate, 1); let k = nextOrder(nd);
-    P.overflow.forEach(t => putTask({ ...t, date: nd, order: k++ }, true));
-    render(); toast(`${P.overflow.length}件を明日へ回しました`);
+    const mv = P.overflow.filter(t => !t.fromDaily); // daily tasks get a fresh copy tomorrow anyway
+    mv.forEach(t => putTask({ ...t, date: nd, order: k++ }, true));
+    render(); toast(`${mv.length}件を明日へ回しました`);
   }
   else if (act === 'pullToday') pullToday(id);
   else if (act === 'waitFold') { S.waitOpen = !S.waitOpen; render(); }
